@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Sonic Squid Mobile</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #0d1b2a; touch-action: none; font-family: sans-serif; }
+        canvas { display: block; width: 100%; height: 100vh; }
+        
+        /* 狀態顯示條 (除錯用) */
+        #status-bar {
+            position: absolute; top: 0; left: 0; width: 100%;
+            padding: 10px; background: rgba(0,0,0,0.5); color: #00ff00;
+            font-size: 14px; pointer-events: none; z-index: 20;
+            text-align: center;
+        }
+
+        #start-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); color: white; display: flex;
+            justify-content: center; align-items: center; z-index: 10;
+            flex-direction: column; text-align: center; padding: 20px;
+        }
+        
+        button#start-btn {
+            padding: 15px 40px; font-size: 24px; background: #00e0ff; color: #000;
+            border: none; border-radius: 50px; cursor: pointer; margin-top: 20px;
+            box-shadow: 0 0 20px rgba(0, 224, 255, 0.5);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="status-bar">等待啟動...</div>
+
+    <div id="start-overlay">
+        <h1 style="margin:0 0 10px 0;">Sonic Squid</h1>
+        <div style="font-size: 14px; opacity: 0.8; margin-bottom: 20px;">
+            請確認靜音模式已關閉<br>(Turn off Silent Mode)
+        </div>
+        <button id="start-btn">START</button>
+    </div>
+    
+    <canvas id="gameCanvas"></canvas>
+
+    <script type="text/javascript" src="rnbo.min.js"></script>
+
+    <script>
+        // --- 除錯工具：顯示訊息在螢幕上 ---
+        const statusBar = document.getElementById('status-bar');
+        function log(msg) {
+            console.log(msg);
+            statusBar.innerText = msg;
+        }
+
+        // --- 1. 變數設定 ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const overlay = document.getElementById('start-overlay');
+        const startBtn = document.getElementById('start-btn');
+        
+        const squid = {
+            x: window.innerWidth / 2,
+            y: window.innerHeight / 2,
+            radius: 30,
+            velocity: 0,
+            gravity: 0.8,
+            jumpForce: -20,
+            color: '#00e0ff'
+        };
+
+        let audioContext;
+        let device;
+        let isAudioReady = false; // 是否載入完成
+
+        // --- 2. 聲音初始化 (針對手機優化) ---
+        async function initAudio() {
+            try {
+                startBtn.disabled = true;
+                startBtn.innerText = "載入中...";
+                log("1. 初始化 AudioContext...");
+
+                // A. 立即建立 AudioContext (同步執行)
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioContext = new AudioContext();
+
+                // B. 立即解鎖 (雖然還沒聲音，但先 Resume)
+                // 這是手機版最關鍵的一步！
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+                log("2. AudioContext 已解鎖/喚醒");
+
+                // C. 開始下載檔案
+                log("3. 下載 patch.export.json...");
+                const response = await fetch('patch.export.json');
+                
+                if (!response.ok) {
+                    throw new Error(`找不到檔案 (${response.status})`);
+                }
+
+                const patcher = await response.json();
+                log("4. 建立 RNBO 裝置...");
+
+                // D. 建立裝置
+                device = await RNBO.createDevice({ context: audioContext, patcher });
+                device.node.connect(audioContext.destination);
+
+                log("5. 聲音引擎就緒！請點擊畫面遊玩");
+                isAudioReady = true;
+
+                // 隱藏開始畫面
+                overlay.style.display = 'none';
+
+            } catch (err) {
+                log("錯誤: " + err.message);
+                startBtn.innerText = "發生錯誤";
+                startBtn.style.background = "red";
+                alert("錯誤：" + err.message);
+            }
+        }
+
+        // --- 3. 觸發跳躍 ---
+        function triggerJump() {
+            // 如果聲音壞了，至少讓遊戲能動 (視覺回饋)
+            // 但我們會檢查 isAudioReady 來決定要不要送訊號給 RNBO
+            
+            const randomIntensity = Math.random(); 
+            squid.velocity = -10 + (squid.jumpForce * randomIntensity * 0.5);
+            squid.color = `hsl(${180 + randomIntensity * 60}, 100%, 50%)`;
+
+            // 只有當聲音準備好才送訊號，避免報錯
+            if (isAudioReady && device) {
+                // RNBO 參數
+                const intensityParam = device.parameters.find(p => p.id === "intensity");
+                if (intensityParam) intensityParam.value = randomIntensity;
+
+                // RNBO 事件
+                // 重要：確保時間準確
+                const event = new RNBO.MessageEvent(audioContext.currentTime, "jump", [1]);
+                device.scheduleEvent(event);
+            }
+        }
+
+        // --- 4. 遊戲迴圈 ---
+        function gameLoop() {
+            ctx.fillStyle = '#0d1b2a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            squid.velocity += squid.gravity;
+            squid.y += squid.velocity;
+
+            if (squid.y + squid.radius > canvas.height) {
+                squid.y = canvas.height - squid.radius;
+                squid.velocity = 0;
+            }
+
+            ctx.beginPath();
+            ctx.arc(squid.x, squid.y, squid.radius, 0, Math.PI * 2);
+            ctx.fillStyle = squid.color;
+            ctx.fill();
+            ctx.closePath();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- 5. 事件監聽 (手機相容性修正) ---
+        
+        // 使用 click 事件來啟動 Audio (相容性最好)
+        startBtn.addEventListener('click', initAudio);
+
+        // 遊戲操作：同時支援 Touch 和 Mouse
+        const handleInput = (e) => {
+            // 只有當 overlay 消失後才允許操作
+            if (overlay.style.display === 'none') {
+                e.preventDefault(); // 防止手機雙擊縮放
+                triggerJump();
+            }
+        };
+
+        window.addEventListener('touchstart', handleInput, { passive: false });
+        window.addEventListener('mousedown', handleInput);
+
+        // 視窗調整
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            squid.x = canvas.width / 2;
+        });
+
+        // 啟動繪圖迴圈
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        gameLoop();
+
+    </script>
+</body>
+</html>
