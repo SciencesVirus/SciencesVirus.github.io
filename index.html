@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Immersive Deep Sea</title>
+  <title>Cyber Squid - Final Fix</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -100,20 +100,17 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">深海沉浸音效版</p>
+    <p style="color: #0aa; font-size: 20px;">全修復版</p>
     <button id="start-btn">開始冒險</button>
     <p id="status-msg">請點擊按鈕以啟動音效</p>
   </div>
 
 <script>
 // ==========================================
-//  PART 1: 聲音系統 (環境音 + 絕對不漏音的珍珠)
+//  PART 1: 聲音系統 (增強珍珠音量)
 // ==========================================
 let jumpSynth, fallSynth, collisionSynth, levelUpSynth, jackpotSynth, dieSynth;
-let bubbleSynth; // 隨機氣泡聲
-let pearlSynth;  // 珍珠專用 (MembraneSynth)
-let ambientNoise, ambientFilter; // 環境音
-
+let bubbleSynth, pearlSynth, ambientNoise;
 let isAudioReady = false;
 let audioInitStarted = false;
 let lastJumpPitch = 600;
@@ -134,46 +131,39 @@ async function initAudio() {
         if (Tone.context.state !== 'running') await Tone.context.resume();
         Tone.Destination.volume.value = 0;
 
-        // 1. Jump (Sine)
         jumpSynth = new Tone.Synth({
             oscillator: { type: "sine" },
             envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 }
         }).toDestination();
         jumpSynth.volume.value = -2;
 
-        // 2. Fall (Sine)
         fallSynth = new Tone.Synth({
             oscillator: { type: "sine" },
             envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
         }).toDestination();
         fallSynth.volume.value = -5;
 
-        // 3. ★ Collect (終極解決方案：MembraneSynth) ★
-        // 這是一種模擬鼓膜的合成器，聲音非常紮實、短促、穿透力強
-        // 把它音調設高，就會變成很棒的 "Pop" 聲，絕對不會因連擊而消失
+        // ★ Collect: MembraneSynth 音量增強 ★
         pearlSynth = new Tone.MembraneSynth({
             pitchDecay: 0.05,
             octaves: 4,
             oscillator: { type: "sine" },
             envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.1 }
         }).toDestination();
-        pearlSynth.volume.value = -2; // 稍微大聲一點
+        pearlSynth.volume.value = 0; // 設為 0dB (最大標準音量)
         
-        // 4. Level Up
         levelUpSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "sawtooth" },
             envelope: { attack: 0.05, decay: 0.5, sustain: 0.3, release: 1.5 }
         }).toDestination();
         levelUpSynth.volume.value = -8;
 
-        // 5. Jackpot
         jackpotSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "triangle" },
             envelope: { attack: 0.1, decay: 0.5, sustain: 0.3, release: 1.0 }
         }).toDestination();
         jackpotSynth.volume.value = -12;
 
-        // 6. Collision
         collisionSynth = new Tone.FMSynth({
             harmonicity: 3.0, modulationIndex: 10, oscillator: { type: "sine" }, modulation: { type: "square" },
             envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 },
@@ -181,27 +171,23 @@ async function initAudio() {
         }).toDestination();
         collisionSynth.volume.value = -2;
         
-        // 7. Death
         dieSynth = new Tone.NoiseSynth({
             noise: { type: "brown" }, envelope: { attack: 0.01, decay: 0.5, sustain: 0 }
         }).toDestination();
         dieSynth.volume.value = -2;
 
-        // 8. ★ 環境氣泡聲 ★
         bubbleSynth = new Tone.MembraneSynth({
             pitchDecay: 0.05, octaves: 2, oscillator: { type: "sine" },
             envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.1 }
         }).toDestination();
-        bubbleSynth.volume.value = -15; // 小聲一點當背景
+        bubbleSynth.volume.value = -15;
 
-        // 9. ★ 深海低鳴 (Ambient Drone) ★
-        // 棕色噪音 + 低通濾波器 = 深海轟隆聲
-        ambientFilter = new Tone.Filter(200, "lowpass").toDestination();
-        ambientNoise = new Tone.Noise("brown").connect(ambientFilter);
-        ambientNoise.volume.value = -20; // 不要太吵
-        ambientNoise.start(); // 開始播放背景音
+        // 環境音
+        let filter = new Tone.Filter(200, "lowpass").toDestination();
+        ambientNoise = new Tone.Noise("brown").connect(filter);
+        ambientNoise.volume.value = -20;
+        ambientNoise.start();
 
-        // 測試音
         const testBeep = new Tone.Synth().toDestination();
         testBeep.triggerAttackRelease("C6", "32n");
 
@@ -235,14 +221,11 @@ function playCollectSound(comboIndex) {
     if (!isAudioReady) return;
     let index = (comboIndex % 10);
     let note = noteMap[index];
-    // 使用 MembraneSynth 播放，聲音會像 "Bloop" 非常清楚
     try { pearlSynth.triggerAttackRelease(note, "32n"); } catch(e){}
 }
 
-// 隨機播放環境氣泡
 function playRandomBubble() {
     if (!isAudioReady) return;
-    // 隨機高音
     let notes = ["C6", "E6", "G6", "C7"];
     let note = random(notes);
     try { bubbleSynth.triggerAttackRelease(note, "32n"); } catch(e){}
@@ -366,7 +349,6 @@ function draw() {
         if(shakeAmount < 0.5) shakeAmount = 0;
     }
     
-    // 背景繪製：如果是通關模式則為金色
     if (gameState === 3) {
         let ctx = drawingContext;
         let g = ctx.createLinearGradient(0, 0, 0, height);
@@ -378,8 +360,6 @@ function draw() {
 
     if (gameState === 1) {
         gameSpeed += 0.0002;
-        
-        // 隨機播放背景氣泡聲 (約每秒 1-2 次)
         if (random() < 0.02) playRandomBubble();
 
         let hasPearlOnScreen = pearls.some(p => p.pos.x > 0 && p.pos.x < width);
@@ -436,6 +416,13 @@ function draw() {
         squid.update();
         squid.display();
         
+        // ★ 關鍵修正：出界判定 (Dead Zone) ★
+        // 如果被推到畫面左邊 (-50px) 之外，直接視為死亡
+        if (squid.pos.x < -squid.size) {
+            squid.hp = 0; // 強制歸零
+            triggerDeath();
+        }
+        
         if (squid.vel.y > 2.5 && !isFallingSoundPlaying) startFallingSequence();
 
         let collision = terrain.checkCollision(squid);
@@ -449,7 +436,9 @@ function draw() {
                 squid.pos.y = collision.limit - squid.size/2 - 2;
                 if (squid.vel.y > 0) squid.vel.y *= -0.5;
             } else if (obstacleHit) {
-                squid.vel.x = -5; squid.vel.y = random(-5, 5);
+                // 撞到障礙物，用力往左推
+                squid.vel.x = -8;
+                squid.vel.y = random(-5, 5);
             }
 
             if (!squid.isInvincible) {
@@ -468,7 +457,9 @@ function draw() {
         document.getElementById('score-val').innerText = score;
 
     } else if (gameState === 2) {
+        // ★ 死亡後：地形凍結 (不呼叫 terrain.update) ★
         terrain.display();
+        
         squid.updatePhysicsOnly();
         squid.display();
         
@@ -483,7 +474,6 @@ function draw() {
             }
         }
     } else if (gameState === 3) {
-        // 通關畫面
         fill(0); textSize(60); textAlign(CENTER, CENTER);
         text("VICTORY!", width/2, height/2 - 40);
         text("完全制霸", width/2, height/2 + 40);
@@ -497,7 +487,6 @@ function draw() {
         }
     }
     
-    // 粒子共用
     if (gameState !== 3 && random() > 0.8) particles.push(new Bubble(width, random(height), false));
     for (let i = particles.length - 1; i >= 0; i--) {
         particles[i].update(); particles[i].display();
@@ -527,6 +516,7 @@ function screenPosition(x, y) { return x; }
 function triggerDeath() {
     gameState = 2; stopFallingSequence(); playDieSound();
     squid.explode();
+    // 爆炸粒子
     for(let k=0; k<20; k++) {
         let b = new Bubble(squid.pos.x, squid.pos.y, true);
         b.vel = p5.Vector.random2D().mult(random(5, 10));
@@ -573,7 +563,7 @@ function drawBackground() {
 }
 
 // ==========================================
-//  PART 3: 類別 (呆萌花園鰻)
+//  PART 3: 類別 (包含花園鰻 & 進化)
 // ==========================================
 
 class CaveObstacle {
@@ -719,6 +709,12 @@ class TechSquid {
             if(this.evolutionLevel >= 5) this.bodyColor = lerpColor(color(255, 215, 0), color(255, 255, 100), sin(frameCount*0.2)*0.5 + 0.5);
             else this.updateColorByLevel();
         }
+        // ★ 核心物理修正：讓烏賊想辦法回到 X=25% 的位置，但會被撞飛 ★
+        let targetX = width * 0.25;
+        let diff = targetX - this.pos.x;
+        this.vel.x += diff * 0.01; // 彈簧回復力
+        this.vel.x *= 0.9; // 阻尼
+
         this.eyeSize = lerp(this.eyeSize, 15, 0.1); this.tentaclePhase += 0.1;
     }
     display() {
