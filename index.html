@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Evolution & Ecology</title>
+  <title>Cyber Squid - Garden Eel Edition</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -50,19 +50,18 @@
         z-index: 10;
     }
     
-    /* 進化提示文字 */
-    .evo-text {
+    .jackpot-text {
         position: absolute;
-        color: #00ffff;
+        color: #FFD700;
         font-weight: bold;
-        font-size: 40px;
+        font-size: 50px;
         pointer-events: none;
-        animation: zoomOut 2s forwards;
-        text-shadow: 0 0 20px #ffffff;
+        animation: zoomOut 3s forwards;
+        text-shadow: 0 0 30px #ffffff;
         z-index: 20;
         width: 100%;
         text-align: center;
-        top: 30%;
+        top: 35%;
     }
     
     @keyframes floatUp {
@@ -85,15 +84,15 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">生態進化版</p>
+    <p style="color: #0aa; font-size: 20px;">花園鰻與可愛夥伴</p>
     <button id="start-btn">開始冒險</button>
   </div>
 
 <script>
 // ==========================================
-//  PART 1: 聲音系統
+//  PART 1: 聲音系統 (穩定Combo & 溫柔Jackpot)
 // ==========================================
-let jumpSynth, fallSynth, collectSynth, collisionSynth, levelUpSynth, dieSynth;
+let jumpSynth, fallSynth, collectSynth, collisionSynth, jackpotSynth, dieSynth;
 let isAudioReady = false;
 let lastJumpPitch = 600;
 let fallTimeoutID = null;
@@ -120,19 +119,22 @@ async function initAudio() {
     }).toDestination();
     fallSynth.volume.value = -5;
 
+    // ★ 修正：Combo音效穩定化 ★
     collectSynth = new Tone.PolySynth(Tone.Synth, {
         maxPolyphony: 32,
         oscillator: { type: "triangle" },
-        envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.5 }
+        // 將 release 縮短到 0.1，聲音變得「顆粒分明」，不會因為疊加而忽大忽小
+        envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.1 }
     }).toDestination();
-    collectSynth.volume.value = -5;
+    collectSynth.volume.value = -4;
     
-    // 進化/升級音效
-    levelUpSynth = new Tone.PolySynth(Tone.Synth, {
-        oscillator: { type: "sawtooth" }, // 更有力量的波形
-        envelope: { attack: 0.05, decay: 0.5, sustain: 0.3, release: 1.5 }
+    // ★ 修正：Jackpot音效溫柔化 ★
+    jackpotSynth = new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: "triangle" },
+        // 將 attack 拉長到 2.0，聲音會慢慢浮現，完全不嚇人
+        envelope: { attack: 2.0, decay: 1.0, sustain: 0.5, release: 3.0 }
     }).toDestination();
-    levelUpSynth.volume.value = -8;
+    jackpotSynth.volume.value = -5;
 
     collisionSynth = new Tone.FMSynth({
         harmonicity: 3.0, modulationIndex: 10, oscillator: { type: "sine" }, modulation: { type: "square" },
@@ -172,17 +174,16 @@ function playJumpSound(power) {
 
 function playCollectSound(comboIndex) {
     if (!isAudioReady) return;
-    // 讓音階循環，不會因為 combo 50 就爆掉
-    let mapIndex = (comboIndex % 10);
-    let rootNote = noteMap[mapIndex];
-    let harmNote = noteMap[(mapIndex + 2) % noteMap.length];
+    let index = (comboIndex % 10);
+    let rootNote = noteMap[index];
+    let harmNote = noteMap[(index + 2) % noteMap.length];
     collectSynth.triggerAttackRelease([rootNote, harmNote], "16n");
 }
 
-function playLevelUpSound() {
+function playJackpotSound() {
     if (!isAudioReady) return;
-    // 升級音效：上行琶音
-    levelUpSynth.triggerAttackRelease(["C5", "E5", "G5", "C6"], "8n");
+    // C Major 9 和弦
+    jackpotSynth.triggerAttackRelease(["C4", "E4", "G4", "B4", "D5"], "1n");
 }
 
 function playCollisionSound() {
@@ -230,7 +231,7 @@ function stopFallingSequence() {
 }
 
 // ==========================================
-//  PART 2: 遊戲邏輯 (進化 & 障礙物)
+//  PART 2: 遊戲邏輯
 // ==========================================
 let squid;
 let particles = [];
@@ -304,12 +305,12 @@ function showComboText(x, y, count) {
     setTimeout(() => { document.body.removeChild(el); }, 1000);
 }
 
-function showEvoText(text) {
+function showJackpotText() {
     let el = document.createElement('div');
-    el.className = 'evo-text';
-    el.innerHTML = text;
+    el.className = 'jackpot-text';
+    el.innerHTML = "JACKPOT!<br>SUPER SQUID MODE!";
     document.body.appendChild(el);
-    setTimeout(() => { document.body.removeChild(el); }, 2000);
+    setTimeout(() => { document.body.removeChild(el); }, 3000);
 }
 
 function draw() {
@@ -325,25 +326,15 @@ function draw() {
     if (gameState === 1) {
         gameSpeed += 0.0002;
         
+        // 智慧 Combo
         let hasPearlOnScreen = pearls.some(p => p.pos.x > 0 && p.pos.x < width);
-        
         if (comboCount > 0) {
             if (hasPearlOnScreen) comboTimer--;
-            
-            let barWidth = map(comboTimer, 0, COMBO_TIME_LIMIT, 0, 200);
-            noStroke();
-            if (hasPearlOnScreen) fill(255, 255, 0, 150);
-            else fill(255, 255, 255, 100);
-            rect(width/2 - 100, 80, barWidth, 10, 5);
-            
-            if (comboTimer <= 0) {
-                comboCount = 0;
-                squid.setEvolution(0);
-            }
+            if (comboTimer <= 0) { comboCount = 0; squid.setEvolution(0); }
         }
         
         terrain.update();
-        terrain.display(); // 這裡也會畫出障礙物 (海星、海鰻)
+        terrain.display();
 
         if (frameCount % 80 === 0 && random() > 0.2) {
             pearls.push(new Pearl(width, terrain.getCenterY(width)));
@@ -358,25 +349,26 @@ function draw() {
                 comboTimer = COMBO_TIME_LIMIT;
                 score += 100 + (comboCount * 50);
                 
-                // ★ 10次進化邏輯 ★
                 let newLevel = floor(comboCount / 10);
                 if (newLevel > squid.evolutionLevel && newLevel <= 5) {
                     squid.setEvolution(newLevel);
-                    playLevelUpSound();
-                    
-                    // 顯示進化文字
-                    let names = ["", "透抽進化!", "水母進化!", "海馬進化!", "燈籠魚進化!", "黃金霸主!"];
-                    showEvoText(names[newLevel]);
-                    
-                    // 升級獎勵
+                    // playLevelUpSound(); // 可以加，但這裡沒實作，用 jackpot 代替
                     squid.hp++;
                     updateHPDisplay();
                     for(let k=0; k<20; k++) stars.push(new StarParticle(p.pos.x, p.pos.y));
                 }
-
-                playCollectSound(comboCount);
-                showComboText(screenPosition(p.pos.x), screenPosition(p.pos.y), comboCount);
-                for(let k=0; k<8; k++) particles.push(new Bubble(p.pos.x, p.pos.y, true));
+                
+                // 10連擊特效
+                if (comboCount % 10 === 0 && comboCount > 0) {
+                    playJackpotSound();
+                    score += 1000;
+                    showJackpotText();
+                    for(let k=0; k<30; k++) stars.push(new StarParticle(p.pos.x, p.pos.y));
+                } else {
+                    playCollectSound(comboCount);
+                    showComboText(screenPosition(p.pos.x), screenPosition(p.pos.y), comboCount);
+                    for(let k=0; k<8; k++) particles.push(new Bubble(p.pos.x, p.pos.y, true));
+                }
                 
                 pearls.splice(i, 1);
             } else if (p.offscreen()) {
@@ -391,9 +383,7 @@ function draw() {
             startFallingSequence();
         }
 
-        // 檢查岩壁碰撞
         let collision = terrain.checkCollision(squid);
-        // 檢查障礙物碰撞 (海星、海鰻)
         let obstacleHit = terrain.checkObstacleCollision(squid);
 
         if (collision.hit || obstacleHit) {
@@ -404,15 +394,14 @@ function draw() {
                 squid.pos.y = collision.limit - squid.size/2 - 2;
                 if (squid.vel.y > 0) squid.vel.y *= -0.5;
             } else if (obstacleHit) {
-                // 撞到障礙物，反彈方向取決於烏賊位置
-                squid.vel.x = -5; // 被打飛
+                squid.vel.x = -5;
                 squid.vel.y = random(-5, 5);
             }
 
             if (!squid.isInvincible) {
                 squid.takeDamage();
                 comboCount = 0;
-                squid.setEvolution(0); // 受傷退化
+                squid.setEvolution(0);
                 shakeAmount = 15;
                 playCollisionSound();
                 updateHPDisplay();
@@ -443,7 +432,6 @@ function draw() {
         }
     }
     
-    // 粒子系統更新
     if (random() > 0.8) particles.push(new Bubble(width, random(height), false));
     for (let i = particles.length - 1; i >= 0; i--) {
         particles[i].update();
@@ -456,6 +444,16 @@ function draw() {
         if (stars[i].finished()) stars.splice(i, 1);
     }
     
+    // ★ 修正：Combo UI 移到最後繪製，確保置頂 ★
+    if (gameState === 1 && comboCount > 0) {
+        let barWidth = map(comboTimer, 0, COMBO_TIME_LIMIT, 0, 200);
+        let hasPearlOnScreen = pearls.some(p => p.pos.x > 0 && p.pos.x < width);
+        noStroke();
+        if (hasPearlOnScreen) fill(255, 255, 0, 150);
+        else fill(255, 255, 255, 100); // 暫停時變白
+        rect(width/2 - 100, 80, barWidth, 10, 5);
+    }
+
     pop();
 }
 
@@ -507,22 +505,22 @@ function drawBackground() {
 }
 
 // ==========================================
-//  PART 3: 類別 (含新障礙物系統)
+//  PART 3: 類別 (造型優化)
 // ==========================================
 
-// ★ 新增：岩洞障礙物 (海星、海鰻) ★
+// ★ 花園鰻 (Garden Eel) ★
 class CaveObstacle {
     constructor(x, y, type, side) {
         this.pos = createVector(x, y);
-        this.type = type; // 'starfish' or 'eel'
-        this.side = side; // 'top' or 'bottom'
+        this.type = type;
+        this.side = side;
         this.size = 40;
         this.angle = random(TWO_PI);
         this.timer = random(100);
     }
     update() {
         this.pos.x -= gameSpeed;
-        this.timer += 0.1;
+        this.timer += 0.05; // 搖擺速度
     }
     display() {
         push();
@@ -530,7 +528,7 @@ class CaveObstacle {
         
         if (this.type === 'starfish') {
             rotate(this.angle + this.timer * 0.5);
-            noStroke(); fill(255, 100, 100); // 紅色海星
+            noStroke(); fill(255, 100, 100);
             beginShape();
             for (let i = 0; i < 5; i++) {
                 let a = TWO_PI * i / 5 - HALF_PI;
@@ -540,37 +538,47 @@ class CaveObstacle {
                 vertex(cos(a) * r * 0.4, sin(a) * r * 0.4);
             }
             endShape(CLOSE);
-            // 點綴
             fill(255, 200); ellipse(0, 0, 5, 5);
         } else if (this.type === 'eel') {
-            // 海鰻探頭
-            let sway = sin(this.timer) * 10;
-            stroke(100, 255, 100); strokeWeight(8); noFill();
-            
-            // 根據是在天花板還是地板決定方向
+            // ★ 花園鰻：白色底 + 黑色斑點 ★
+            let sway = sin(this.timer) * 15; // 搖擺幅度
             let dir = (this.side === 'top') ? 1 : -1;
             
+            // 身體
+            noFill();
+            stroke(240); // 白色
+            strokeWeight(12);
             beginShape();
-            vertex(0, 0); // 根部
-            bezierVertex(0, 20*dir, sway, 40*dir, sway*1.5, 60*dir); // 身體扭動
+            vertex(0, 0);
+            // S型曲線
+            bezierVertex(0, 20*dir, sway, 40*dir, sway*0.5, 70*dir);
             endShape();
             
-            // 頭
-            noStroke(); fill(100, 255, 100);
-            ellipse(sway*1.5, 60*dir, 15, 20);
-            // 眼睛
-            fill(255); ellipse(sway*1.5 - 4, 60*dir, 5, 5);
-            fill(0); ellipse(sway*1.5 - 4, 60*dir, 2, 2);
+            // 斑點 (裝飾用)
+            noStroke(); fill(50);
+            ellipse(0, 10*dir, 4, 4);
+            ellipse(sway*0.3, 30*dir, 4, 4);
+            ellipse(sway*0.4, 50*dir, 4, 4);
+
+            // 頭部
+            fill(240);
+            let headX = sway*0.5;
+            let headY = 70*dir;
+            ellipse(headX, headY, 18, 22);
+            
+            // 呆萌眼睛
+            fill(0);
+            ellipse(headX - 4, headY, 3, 3);
+            ellipse(headX + 4, headY, 3, 3);
         }
         pop();
     }
     checkCollision(squid) {
-        // 簡單圓形碰撞
         let hitDist = this.size/2 + squid.size/2;
         let offsetY = 0;
         if (this.type === 'eel') {
             let dir = (this.side === 'top') ? 1 : -1;
-            offsetY = 60 * dir; // 碰撞點算在鰻魚頭部
+            offsetY = 70 * dir; // 判定點在頭部
         }
         let d = dist(this.pos.x, this.pos.y + offsetY, squid.pos.x, squid.pos.y);
         return d < hitDist;
@@ -583,27 +591,21 @@ class CaveTerrain {
         if(randomize) this.noiseOffset = random(10000);
         else this.noiseOffset = 0;
         this.segments = [];
-        this.obstacles = []; // ★ 障礙物陣列 ★
+        this.obstacles = [];
         for(let x=0; x<=width; x+=10) this.addSegment(x);
     }
-    
     addSegment(x) {
         let h = this.generateHeight(x);
         this.segments.push(h);
-        
-        // ★ 生成障礙物機率 ★
-        if (random() < 0.05) { // 5% 機率
+        if (random() < 0.05) {
             let type = random() < 0.5 ? 'starfish' : 'eel';
             let side = random() < 0.5 ? 'top' : 'bottom';
             let y = (side === 'top') ? h.top : h.bottom;
-            // 稍微往內縮一點
             let offset = (side === 'top') ? -10 : 10;
-            if (type === 'eel') offset = 0; // 鰻魚直接長在牆上
-            
+            if (type === 'eel') offset = 0;
             this.obstacles.push(new CaveObstacle(x, y + offset, type, side));
         }
     }
-    
     generateHeight(x) {
         let n = noise(this.noiseOffset);
         this.noiseOffset += 0.02;
@@ -616,8 +618,6 @@ class CaveTerrain {
         if (this.segments[0].x < -10) { this.segments.shift(); }
         let lastX = this.segments[this.segments.length-1].x;
         if (lastX < width) { this.addSegment(lastX + 10); }
-        
-        // 更新障礙物
         for (let i = this.obstacles.length - 1; i >= 0; i--) {
             this.obstacles[i].update();
             if (this.obstacles[i].pos.x < -50) this.obstacles.splice(i, 1);
@@ -631,8 +631,6 @@ class CaveTerrain {
         beginShape(); vertex(0, height);
         for (let s of this.segments) vertex(s.x, s.bottom);
         vertex(width, height); endShape(CLOSE);
-        
-        // 畫障礙物
         for (let o of this.obstacles) o.display();
     }
     getCenterY(atX) { return map(noise(this.noiseOffset * 0.5 + 100), 0, 1, 50, height-50); }
@@ -648,7 +646,6 @@ class CaveTerrain {
         }
         return { hit: false, type: 'none', limit: 0 };
     }
-    // 檢查障礙物碰撞
     checkObstacleCollision(squid) {
         for (let o of this.obstacles) {
             if (o.checkCollision(squid)) return true;
@@ -673,10 +670,7 @@ class Pearl {
 
 class TechSquid {
     constructor(x, y) {
-        this.reset(x, y);
-        this.size = 60;
-        this.baseColor = color(0, 255, 255);
-        this.evolutionLevel = 0;
+        this.reset(x, y); this.size = 60; this.baseColor = color(0, 255, 255); this.evolutionLevel = 0;
     }
     reset(x, y) {
         this.pos = createVector(x, y); this.vel = createVector(0, 0);
@@ -688,7 +682,7 @@ class TechSquid {
     }
     setEvolution(level) {
         this.evolutionLevel = level;
-        this.size = 60 + (min(level, 5) * 5); // 隨等級變大
+        this.size = 60 + (min(level, 5) * 5);
     }
     takeDamage() {
         this.hp--; this.invincibleTimer = 90; this.isInvincible = true;
@@ -704,18 +698,15 @@ class TechSquid {
         this.vel.y = -15; this.vel.x = random(-2, 2); this.bodyColor = color(100, 100, 100);
     }
     updatePhysicsOnly() {
-        this.vel.y += this.gravity;
-        this.pos.add(this.vel);
-        this.tentaclePhase += 0.05;
-        this.vel.x *= 0.99;
-        this.pos.x += this.vel.x;
+        this.vel.y += this.gravity; this.vel.mult(this.drag);
+        this.pos.add(this.vel); this.tentaclePhase += 0.05; this.vel.x *= 0.99; this.pos.x += this.vel.x;
     }
     updateColorByLevel() {
-        if (this.evolutionLevel >= 5) this.bodyColor = color(255, 215, 0); // Gold
-        else if (this.evolutionLevel === 4) this.bodyColor = color(50, 50, 100); // Anglerfish Dark Blue
-        else if (this.evolutionLevel === 3) this.bodyColor = color(100, 200, 100); // Seahorse Green
-        else if (this.evolutionLevel === 2) this.bodyColor = color(200, 200, 255); // Jellyfish White
-        else if (this.evolutionLevel === 1) this.bodyColor = color(255, 150, 150); // Cuttlefish Pink
+        if (this.evolutionLevel >= 5) this.bodyColor = color(255, 215, 0);
+        else if (this.evolutionLevel === 4) this.bodyColor = color(50, 50, 100);
+        else if (this.evolutionLevel === 3) this.bodyColor = color(100, 200, 100);
+        else if (this.evolutionLevel === 2) this.bodyColor = color(200, 200, 255);
+        else if (this.evolutionLevel === 1) this.bodyColor = color(255, 150, 150);
         else this.bodyColor = this.baseColor;
     }
     update() {
@@ -739,19 +730,17 @@ class TechSquid {
     display() {
         push(); translate(this.pos.x, this.pos.y);
         if (gameState === 2) rotate(frameCount * 0.2); else rotate(this.vel.y * 0.02);
-        
         scale(1, this.squish);
         
-        // ★ 進化繪圖切換 ★
         let level = this.evolutionLevel;
-        if (level >= 5) level = 5; // 最高就是黃金烏賊
+        if (level >= 5) level = 5;
 
         if (level === 0) this.drawSquid();
         else if (level === 1) this.drawCuttlefish();
         else if (level === 2) this.drawJellyfish();
-        else if (level === 3) this.drawSeahorse();
-        else if (level === 4) this.drawAnglerfish(); // 燈籠魚
-        else if (level === 5) this.drawGoldenSquid(); // 黃金烏賊
+        else if (level === 3) this.drawSeahorse(); // 新海馬
+        else if (level === 4) this.drawAnglerfish(); // 新燈籠魚
+        else if (level === 5) this.drawGoldenSquid();
         
         pop();
     }
@@ -796,39 +785,56 @@ class TechSquid {
         this.drawEyes(-15, -10);
     }
     
-    drawSeahorse() {
-        noFill(); stroke(this.bodyColor); strokeWeight(15);
+    drawSeahorse() { // ★ 新海馬 ★
+        noFill(); stroke(this.bodyColor); strokeWeight(18);
         beginShape();
-        vertex(0, -30);
-        bezierVertex(20, -30, 20, 0, 0, 10);
-        bezierVertex(-20, 20, -20, 40, 10, 50);
+        vertex(0, -35); // 頂端
+        bezierVertex(20, -35, 25, -10, 5, 10); // 頭頸
+        bezierVertex(-25, 25, -25, 50, 15, 60); // 捲尾
         endShape();
-        noStroke(); fill(255);
-        ellipse(5, -25, 10); fill(0); ellipse(7, -25, 3);
+        
+        // 吻部
+        strokeWeight(8); line(0, -30, -20, -25);
+        
+        // 背鰭
+        noStroke(); fill(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 150);
+        triangle(-10, 0, -25, 10, -10, 20);
+
+        noStroke(); fill(255); ellipse(5, -25, 12); fill(0); ellipse(7, -25, 4);
     }
     
-    drawAnglerfish() { // ★ 燈籠魚 ★
-        stroke(255); strokeWeight(2); line(0, -30, 25, -50);
-        // 發光燈籠
-        noStroke(); fill(255, 255, 0); ellipse(25, -50, 12);
-        fill(255, 255, 0, 100); ellipse(25, -50, 25);
+    drawAnglerfish() { // ★ 新燈籠魚 ★
+        // 釣竿
+        stroke(255); strokeWeight(2);
+        noFill();
+        beginShape(); vertex(0, -25); bezierVertex(10, -40, 20, -40, 30, -20); endShape();
+        // 燈籠
+        noStroke(); fill(255, 255, 0); ellipse(30, -20, 15);
+        fill(255, 255, 0, 100); ellipse(30, -20, 30);
 
-        fill(this.bodyColor); ellipse(0, 0, 70, 60);
-        fill(255);
-        triangle(-20, 10, -15, 25, -10, 10); triangle(10, 10, 15, 25, 20, 10);
+        // 胖身體
+        fill(this.bodyColor); ellipse(0, 0, 80, 70);
         
-        // 兇狠的眼睛
-        fill(255); ellipse(-15, -15, 15, 15);
-        fill(0); ellipse(-15, -15, 5, 5);
+        // 巨大下巴 (厚道)
+        fill(this.bodyColor);
+        arc(0, 20, 70, 40, 0, PI);
+
+        // 尖牙
+        fill(255);
+        triangle(-20, 25, -15, 45, -10, 25);
+        triangle(10, 25, 15, 45, 20, 25);
+        triangle(0, 25, 5, 40, 10, 25);
+        
+        // 眼睛
+        fill(255); ellipse(-15, -10, 18, 18);
+        fill(0); ellipse(-15, -10, 5, 5);
     }
 
-    drawGoldenSquid() { // ★ 黃金烏賊王 ★
+    drawGoldenSquid() {
         this.drawSquid();
-        // 墨鏡配件
         fill(0); noStroke();
         rect(-35, -15, 30, 15, 2); rect(5, -15, 30, 15, 2); rect(-5, -10, 10, 3);
         fill(255, 100); rect(-30, -12, 10, 5); rect(10, -12, 10, 5);
-        // 皇冠
         fill(255, 215, 0); stroke(255); strokeWeight(2);
         beginShape();
         vertex(-20, -35); vertex(-10, -50); vertex(0, -35); vertex(10, -50); vertex(20, -35);
