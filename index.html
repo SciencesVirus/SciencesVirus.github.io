@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Final Fixed</title>
+  <title>Cyber Squid - Logic Fixed</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -100,17 +100,20 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">接龍音效修復版</p>
+    <p style="color: #0aa; font-size: 20px;">邏輯修正版</p>
     <button id="start-btn">開始冒險</button>
     <p id="status-msg">請點擊按鈕以啟動音效</p>
   </div>
 
 <script>
 // ==========================================
-//  PART 1: 聲音系統 (方波珍珠 + 接龍瀑布音)
+//  PART 1: 聲音系統 (維持原案：方波池 + 接龍音)
 // ==========================================
 let jumpSynth, fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, victorySynth, dieSynth;
 let ambientNoise;
+let pearlSynths = [];
+let pearlSynthIndex = 0;
+
 let isAudioReady = false;
 let audioInitStarted = false;
 let lastJumpPitch = 600;
@@ -131,52 +134,48 @@ async function initAudio() {
         if (Tone.context.state !== 'running') await Tone.context.resume();
         Tone.Destination.volume.value = 0;
 
-        // 1. Jump
         jumpSynth = new Tone.Synth({
             oscillator: { type: "sine" },
             envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 }
         }).toDestination();
         jumpSynth.volume.value = -2;
 
-        // 2. Fall
         fallSynth = new Tone.Synth({
             oscillator: { type: "sine" },
             envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
         }).toDestination();
         fallSynth.volume.value = -5;
 
-        // 3. ★ Collect (回歸 PolySynth + Square) ★
-        // 您說這個版本最有聲音，我們就用這個，開到 64 複音
-        collectSynth = new Tone.PolySynth(Tone.Synth, {
-            maxPolyphony: 64, // 確保不吃音
-            oscillator: { type: "square" }, // 方波最清楚有力
-            envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 } // 極短，像顆粒
-        }).toDestination();
-        collectSynth.volume.value = -12; // 方波較大聲，適度衰減
+        // Collect (Audio Pool + Square)
+        for(let i=0; i<15; i++) {
+            let s = new Tone.Synth({
+                oscillator: { type: "square" },
+                envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
+            }).toDestination();
+            s.volume.value = -12;
+            pearlSynths.push(s);
+        }
         
-        // 4. Level Up
         levelUpSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "sawtooth" },
             envelope: { attack: 0.05, decay: 0.5, sustain: 0.3, release: 1.5 }
         }).toDestination();
         levelUpSynth.volume.value = -8;
 
-        // 5. ★ Jackpot (接龍瀑布音) ★
-        // 使用極快的琶音來模擬接龍卡牌掉落的聲音
+        // Jackpot (Windows Solitaire)
         jackpotSynth = new Tone.Synth({
             oscillator: { type: "square" },
             envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.1 }
         }).toDestination();
         jackpotSynth.volume.value = -10;
 
-        // 6. Victory
+        // Victory
         victorySynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "fatsawtooth", count: 3, spread: 30 },
             envelope: { attack: 0.1, decay: 0.5, sustain: 1.0, release: 4.0 }
         }).toDestination();
         victorySynth.volume.value = -12;
 
-        // 7. Collision
         collisionSynth = new Tone.FMSynth({
             harmonicity: 3.0, modulationIndex: 10, oscillator: { type: "sine" }, modulation: { type: "square" },
             envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 },
@@ -184,13 +183,12 @@ async function initAudio() {
         }).toDestination();
         collisionSynth.volume.value = -2;
         
-        // 8. Death
         dieSynth = new Tone.NoiseSynth({
             noise: { type: "brown" }, envelope: { attack: 0.01, decay: 0.5, sustain: 0 }
         }).toDestination();
         dieSynth.volume.value = -2;
 
-        // 9. Ambient (深海低頻 - 您的最愛)
+        // Ambient
         let filter = new Tone.Filter(200, "lowpass").toDestination();
         ambientNoise = new Tone.Noise("brown").connect(filter);
         ambientNoise.volume.value = -22;
@@ -237,8 +235,10 @@ function playCollectSound(comboIndex) {
     if (!isAudioReady) return;
     let index = (comboIndex % 10);
     let note = noteMap[index];
-    // velocity 1.0 確保有力
-    try { collectSynth.triggerAttackRelease(note, "16n", undefined, 1.0); } catch(e){}
+    try {
+        pearlSynths[pearlSynthIndex].triggerAttackRelease(note, "32n");
+        pearlSynthIndex = (pearlSynthIndex + 1) % pearlSynths.length;
+    } catch(e){}
 }
 
 function playLevelUpSound() {
@@ -246,10 +246,8 @@ function playLevelUpSound() {
     try { levelUpSynth.triggerAttackRelease(["C5", "E5", "G5", "C6"], "8n"); } catch(e){}
 }
 
-// ★ 接龍瀑布音效 (Solitaire Cascade) ★
 function playJackpotSound() {
     if (!isAudioReady) return;
-    // 快速播放一連串下行音階，模擬接龍卡牌
     let now = Tone.now();
     let notes = ["C6", "B5", "A5", "G5", "F5", "E5", "D5", "C5", "B4", "A4", "G4", "F4", "E4", "D4", "C4"];
     for (let i = 0; i < notes.length; i++) {
@@ -296,12 +294,12 @@ function stopFallingSequence() {
 }
 
 // ==========================================
-//  PART 2: 遊戲邏輯 (進化修復)
+//  PART 2: 遊戲邏輯 (修正後的 Combo 進化)
 // ==========================================
 let squid;
 let particles = []; let stars = []; let terrain; let pearls = [];
 let gameState = 0; let score = 0; let gameSpeed = 3; let shakeAmount = 0; let canRestart = false;
-let comboCount = 0; let comboTimer = 0; const COMBO_TIME_LIMIT = 300; const VICTORY_COMBO = 60;
+let comboCount = 0; let comboTimer = 0; const COMBO_TIME_LIMIT = 300;
 let startCountdownTimer = 0;
 
 function setup() {
@@ -425,26 +423,34 @@ function draw() {
                 comboTimer = COMBO_TIME_LIMIT;
                 score += 100 + (comboCount * 50);
                 
-                // ★ 絕對進化邏輯：不依賴 if 判斷，直接計算 ★
-                let currentLevel = floor(comboCount / 10);
-                if (currentLevel <= 5 && currentLevel > squid.evolutionLevel) {
-                    squid.setEvolution(currentLevel); // 強制升級
-                    playLevelUpSound();
-                    let names = ["", "透抽進化!", "水母進化!", "海馬進化!", "燈籠魚進化!", "黃金霸主!"];
-                    showEvoText(names[currentLevel]);
-                    squid.hp++;
-                    updateHPDisplay();
-                    for(let k=0; k<20; k++) stars.push(new StarParticle(p.pos.x, p.pos.y));
-                }
-                
-                if (comboCount >= VICTORY_COMBO) {
-                    triggerVictory();
-                } else if (comboCount > 0 && comboCount % 10 === 0) {
-                    playJackpotSound();
-                    score += 1000;
-                    showJackpotText();
-                    for(let k=0; k<30; k++) stars.push(new StarParticle(p.pos.x, p.pos.y));
+                // ★ 修正後的邏輯：只要當前 Combo 是 10 的倍數，就進化 ★
+                // 不需要管現在是第幾關，只要玩家能打出 10 連鎖，就是一個里程碑
+                if (comboCount > 0 && comboCount % 10 === 0) {
+                    
+                    // 如果還是普通動物 (Lv 0-4)，就升級
+                    if (squid.evolutionLevel < 5) {
+                        squid.evolveNext(); // 升一級
+                        playLevelUpSound();
+                        
+                        let names = ["", "透抽進化!", "水母進化!", "海馬進化!", "燈籠魚進化!", "黃金霸主!"];
+                        showEvoText(names[squid.evolutionLevel]);
+                        
+                        squid.hp++;
+                        updateHPDisplay();
+                        for(let k=0; k<20; k++) stars.push(new StarParticle(p.pos.x, p.pos.y));
+                        
+                        // 播放 Jackpot 音效 (接龍)
+                        playJackpotSound();
+                        score += 1000;
+                        showJackpotText();
+                        for(let k=0; k<30; k++) stars.push(new StarParticle(p.pos.x, p.pos.y));
+                    }
+                    // 如果已經是黃金烏賊 (Lv 5)，且又滿了 10 個 Combo -> 勝利
+                    else if (squid.evolutionLevel === 5) {
+                        triggerVictory();
+                    }
                 } else {
+                    // 普通吃珠
                     playCollectSound(comboCount);
                     showComboText(screenPosition(p.pos.x), screenPosition(p.pos.y), comboCount);
                     for(let k=0; k<8; k++) particles.push(new Bubble(p.pos.x, p.pos.y, true));
@@ -458,7 +464,6 @@ function draw() {
         squid.update();
         squid.display();
         
-        // Dead Zone
         if (squid.pos.x < -squid.size) { squid.hp = 0; triggerDeath(); }
         
         if (squid.vel.y > 2.5 && !isFallingSoundPlaying) startFallingSequence();
@@ -711,7 +716,12 @@ class TechSquid {
         this.hp = 3; this.invincibleTimer = 0; this.isInvincible = false; this.evolutionLevel = 0;
     }
     setEvolution(level) {
-        if (level > this.evolutionLevel) { this.evolutionLevel = level; this.size = 60 + (min(level, 5) * 5); }
+        // ★ 簡化：直接設定等級 ★
+        this.evolutionLevel = level;
+        this.size = 60 + (min(level, 5) * 5);
+    }
+    evolveNext() {
+        this.setEvolution(min(this.evolutionLevel + 1, 5));
     }
     takeDamage() { this.hp--; this.invincibleTimer = 90; this.isInvincible = true; this.bodyColor = color(255, 50, 50); }
     jump(power) {
