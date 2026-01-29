@@ -3,369 +3,329 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - RNBO Jump</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  <title>Cyber Squid (Tone.js Version)</title>
   
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+
   <style>
-    body {
-      margin: 0; padding: 0; background-color: #000;
-      overflow: hidden; /* 防止捲軸與手機縮放 */
-      touch-action: none;
-      font-family: 'Courier New', Courier, monospace;
+    body { margin: 0; padding: 0; background: #000; overflow: hidden; touch-action: none; font-family: 'Courier New', monospace; }
+    
+    #overlay {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0, 10, 20, 0.9);
+      display: flex; flex-direction: column;
+      justify-content: center; align-items: center; z-index: 999;
+      color: #0ff; text-align: center;
     }
-    /* 啟動遮罩層 (沿用昨天的設計，但配合新風格微調) */
-    #start-overlay {
-        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-        background: rgba(0,10,20,0.9); color: #0ff; display: flex;
-        justify-content: center; align-items: center; z-index: 10;
-        flex-direction: column; text-align: center; padding: 20px;
+    
+    button {
+      padding: 15px 40px; font-size: 24px; color: #0ff;
+      background: transparent; border: 2px solid #0ff; border-radius: 5px;
+      cursor: pointer; margin-top: 20px;
+      box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
     }
-    h1 { text-shadow: 0 0 10px #0ff; margin-bottom: 10px; }
-    #start-btn {
-        padding: 15px 40px; font-size: 20px;
-        background: transparent; color: #0ff;
-        border: 2px solid #0ff; border-radius: 5px; cursor: pointer; margin-top: 30px;
-        box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
+    
+    #status-bar {
+      position: absolute; top: 10px; right: 10px; color: rgba(0,255,255,0.7);
+      font-size: 14px; pointer-events: none;
     }
   </style>
 </head>
 <body>
 
-  <div id="start-overlay">
-      <h1>CYBER SQUID</h1>
-      <div>Tap to Initialize Audio System</div>
-      <button id="start-btn">INITIALIZE</button>
-  </div>
+  <div id="status-bar">Audio Engine: Tone.js</div>
 
-  <script type="text/javascript" src="rnbo.min.js"></script>
+  <div id="overlay">
+    <h1 style="text-shadow: 0 0 20px #0ff;">CYBER SQUID</h1>
+    <p>Tone.js Procedural Sound</p>
+    <button id="start-btn">START DIVE</button>
+    <p style="font-size: 12px; margin-top: 15px; opacity: 0.7;">請關閉靜音模式 (Turn off Silent Mode)</p>
+  </div>
 
 <script>
 // ==========================================
-//  PART 1: RNBO 音訊系統 (沿用昨天的穩定版)
+//  PART 1: Tone.js 聲音邏輯 (Bouncing Ball)
 // ==========================================
-let audioContext;
-let device;
+let bounceSynth;
 let isAudioReady = false;
-const overlay = document.getElementById('start-overlay');
-const startBtn = document.getElementById('start-btn');
 
 async function initAudio() {
-    try {
-        startBtn.disabled = true;
-        startBtn.innerText = "LOADING CORE...";
-        
-        // 1. 建立 AudioContext 並立即解鎖
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        audioContext = new AudioContext();
-        if (audioContext.state === 'suspended') {
-            await audioContext.resume();
+    await Tone.start();
+    
+    // 建立合成器 (簡單的正弦波)
+    bounceSynth = new Tone.Synth({
+        oscillator: { type: "sine" },
+        envelope: {
+            attack: 0.005,
+            decay: 0.1,
+            sustain: 0,
+            release: 0.1
         }
-        console.log("AudioContext Resumed");
+    }).toDestination();
+    
+    // 調整音量
+    bounceSynth.volume.value = -5;
 
-        // 2. 下載並建立 RNBO 裝置
-        const response = await fetch('patch.export.json');
-        if (!response.ok) throw new Error(`File not found (${response.status})`);
-        const patcher = await response.json();
+    isAudioReady = true;
+    document.getElementById('overlay').style.display = 'none';
+    
+    // 開始遊戲迴圈
+    startGame();
+}
+
+// ★ 核心聲音演算法：遞減的時間間隔 ★
+function triggerBouncingSound(power) {
+    if (!isAudioReady) return;
+
+    // 根據力道決定：起始頻率(高低) 與 起始間隔(快慢)
+    let startPitch = map(power, 0.1, 1.0, 300, 1200);
+    let startGap = map(power, 0.1, 1.0, 0.15, 0.4);
+    
+    let now = Tone.now();
+    let currentGap = startGap;
+    let currentPitch = startPitch;
+    let currentVol = 0; // dB
+
+    // 預排 10 次彈跳
+    for (let i = 0; i < 10; i++) {
+        // 如果頻率太低或間隔太短就停止
+        if (currentPitch < 50 || currentGap < 0.01) break;
+
+        bounceSynth.triggerAttackRelease(
+            currentPitch,
+            currentGap * 0.8, // 音符長度比間隔短一點
+            now,
+            Tone.dbToGain(currentVol) // 轉成 Gain
+        );
+
+        // 下一次的時間點
+        now += currentGap;
         
-        device = await RNBO.createDevice({ context: audioContext, patcher });
-        device.node.connect(audioContext.destination);
-
-        console.log("RNBO Engine Ready");
-        isAudioReady = true;
-        
-        // 隱藏遮罩，開始遊戲
-        overlay.style.display = 'none';
-        // 開始 p5 的迴圈
-        loop();
-
-    } catch (err) {
-        console.error(err);
-        startBtn.innerText = "ERROR Check Console";
-        startBtn.style.borderColor = "red";
-        startBtn.style.color = "red";
+        // ★ 物理衰減公式 ★
+        currentGap *= 0.75;    // 時間變快 (間隔變短)
+        currentPitch *= 0.85;  // 音高變低
+        currentVol -= 3;       // 音量變小 (-3dB)
     }
 }
 
-// 綁定啟動按鈕
-startBtn.addEventListener('click', initAudio);
-
 
 // ==========================================
-//  PART 2: p5.js 遊戲與視覺系統 (改編自新版代碼)
+//  PART 2: p5.js 遊戲與視覺
 // ==========================================
-
 let squid;
 let bubbles = [];
+let gameState = 0; // 0:Menu, 1:Play, 2:Over
+let score = 0;
 
-// p5.js 的初始化函數
 function setup() {
-  createCanvas(windowWidth, windowHeight);
-  noLoop(); // 先暫停繪圖迴圈，直到聲音載入完成
-
-  // 初始化章魚在畫面中央
-  squid = new TechSquid(width/2, height/2);
-  
-  // 初始化背景氣泡
-  for(let i=0; i<30; i++){
-    bubbles.push(new Bubble());
-  }
+    createCanvas(windowWidth, windowHeight);
+    squid = new TechSquid(width/2, height/2);
+    for(let i=0; i<30; i++) bubbles.push(new Bubble());
+    
+    // 綁定按鈕
+    document.getElementById('start-btn').addEventListener('click', initAudio);
+    noLoop(); // 等待按鈕點擊
 }
 
-// p5.js 的繪圖迴圈 (相當於昨天的 gameLoop)
+function startGame() {
+    gameState = 1;
+    score = 0;
+    squid.reset(width/2, height/2);
+    loop();
+}
+
 function draw() {
-  drawBackground();
-  
-  // 更新與繪製氣泡
-  for (let b of bubbles) {
-    b.update();
-    b.display();
-  }
-  
-  // 更新與繪製章魚
-  squid.update();
-  squid.display();
-  
-  // 簡單的邊界檢查 (掉到底部反彈，防止無限下墜)
-  if (squid.pos.y > height - squid.size/2) {
-      squid.pos.y = height - squid.size/2;
-      squid.vel.y *= -0.5; // 簡單反彈
-  }
+    drawBackground();
+
+    // 背景氣泡
+    for (let b of bubbles) {
+        b.update();
+        b.display();
+    }
+
+    if (gameState === 1) {
+        squid.update();
+        squid.display();
+        
+        // 邊界檢查 (碰到上下都死)
+        if (squid.pos.y > height + 50 || squid.pos.y < -50) {
+            gameOver();
+        }
+        
+        // 分數顯示
+        score += 0.05;
+        fill(255); textSize(20); textAlign(LEFT, TOP);
+        text("DEPTH: " + floor(score) + "m", 20, 20);
+        
+    } else if (gameState === 2) {
+        squid.display();
+        fill(255, 50, 50); textSize(50); textAlign(CENTER, CENTER);
+        text("GAME OVER", width/2, height/2);
+        textSize(20); fill(255);
+        text("Tap to Retry", width/2, height/2 + 50);
+    }
 }
 
-// 處理視窗大小改變
-function windowResized() {
-  resizeCanvas(windowWidth, windowHeight);
-  squid.pos.x = width/2; // 重置位置到中央
+function gameOver() {
+    gameState = 2;
+    // 播放一個失敗音效
+    if(isAudioReady) {
+        const now = Tone.now();
+        const osc = new Tone.Oscillator(150, "sawtooth").toDestination().start(now);
+        osc.frequency.rampTo(50, 0.5, now);
+        osc.stop(now + 0.5);
+    }
 }
 
-// 處理點擊/觸控事件
 function mousePressed() {
-  // 只有當聲音準備好，且遮罩層消失後才允許跳躍
-  if (isAudioReady && overlay.style.display === 'none') {
-    squid.jump();
-  }
-  // 防止手機上的預設行為 (如縮放)
-  return false;
+    if (!isAudioReady) return;
+
+    if (gameState === 1) {
+        // 遊戲中：跳躍 + 聲音
+        let power = random(0.5, 0.9); // 模擬隨機力度
+        squid.jump(power);
+        triggerBouncingSound(power); // ★ 呼叫 Tone.js 聲音
+    } else if (gameState === 2) {
+        // 結束時：重來
+        startGame();
+    }
+    return false;
 }
 
+function windowResized() {
+    resizeCanvas(windowWidth, windowHeight);
+    squid.pos.x = width/2;
+}
 
-// 繪製深海背景
+// 背景漸層
 function drawBackground() {
-  // 取得 p5.js 背後的原生畫布 context，這是畫漸層最高效的方法
-  let ctx = drawingContext;
-
-  // 1. 設定漸層方向：從 (0, 0) 到 (0, height) 即「從上到下」
-  let gradient = ctx.createLinearGradient(0, 0, 0, height);
-
-  // 2. 設定顏色停損點 (Color Stops)
-  // 0.0 = 最頂端, 1.0 = 最底端
-  gradient.addColorStop(0, "#050f1e");   // 頂端：深藍色 (有點光透下來的感覺)
-  gradient.addColorStop(0.4, "#020810"); // 中間：漸漸變黑
-  gradient.addColorStop(1, "#000000");   // 底部：完全漆黑 (深海海溝)
-
-  // 3. 填滿整個畫面
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, width, height);
+    let ctx = drawingContext;
+    let gradient = ctx.createLinearGradient(0, 0, 0, height);
+    gradient.addColorStop(0, "#050f1e");
+    gradient.addColorStop(1, "#000000");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
 }
 
-
 // ==========================================
-//  PART 3: 類別定義 (TechSquid & Bubble)
+//  PART 3: 章魚與氣泡類別
 // ==========================================
-
 class TechSquid {
-  constructor(x, y) {
-    // --- 物理參數調整 ---
-    // 這裡調整手感，讓它接近昨天的 Bouncing Ball
-    this.gravity = 0.4;   // 重力
-    this.jumpForce = -12; // 跳躍力道
-    this.drag = 0.98;     // 空氣阻力 (讓移動平滑)
-    
-    this.size = 60;
-    this.baseColor = color(0, 255, 255); // 基本青色
-    this.jumpColor = color(255, 50, 255); // 跳躍時的紫紅色
-    this.reset(x, y);
-  }
-  
-  reset(x, y) {
-    // 使用 p5 的向量來處理物理
-    this.pos = createVector(x, y);
-    this.vel = createVector(0, 0);
-    this.bodyColor = this.baseColor;
-    this.squish = 1.0; // 擠壓變形量
-    this.tentaclePhase = 0; // 觸手波動相位
-    this.eyeSize = 15;
-  }
-  
-  // ★ 核心功能：跳躍並觸發 RNBO ★
-  jump() {
-    // 1. 物理跳躍
-    this.vel.y = this.jumpForce;
-    
-    // 2. 視覺回饋
-    this.bodyColor = this.jumpColor; // 變色
-    this.squish = 0.7; // 變扁
-    this.eyeSize = 25; // 眼睛睜大
-    
-    // 產生跳躍粒子效果
-    for(let i=0; i<8; i++) {
-      bubbles.push(new Bubble(this.pos.x, this.pos.y + this.size/2, true));
+    constructor(x, y) {
+        this.reset(x, y);
+        this.size = 60;
+        this.baseColor = color(0, 255, 255);
     }
-
-    // 3. ★ 觸發 RNBO 聲音 (昨天的邏輯) ★
-    if (isAudioReady && device) {
-        const randomIntensity = random(0.7, 1.0); // 隨機一點力度變化
+    
+    reset(x, y) {
+        this.pos = createVector(x, y);
+        this.vel = createVector(0, 0);
+        this.gravity = 0.4;
+        this.drag = 0.96;
+        this.bodyColor = this.baseColor;
+        this.squish = 1.0;
+        this.tentaclePhase = 0;
+        this.eyeSize = 15;
+    }
+    
+    jump(power) {
+        this.vel.y = -10 - (power * 2); // 向上跳
+        this.squish = 0.7;
+        this.bodyColor = color(255, 50, 255);
+        this.eyeSize = 25;
         
-        // 設定參數 (如果有需要)
-        const intensityParam = device.parameters.find(p => p.id === "intensity");
-        if (intensityParam) intensityParam.value = randomIntensity;
-
-        // 發送事件
-        const event = new RNBO.MessageEvent(audioContext.currentTime, "jump", [1]);
-        device.scheduleEvent(event);
-    }
-  }
-  
-  update() {
-    // 物理計算
-    this.vel.y += this.gravity;     // 施加重力
-    this.vel.mult(this.drag);       // 施加阻力
-    this.pos.add(this.vel);         // 更新位置
-    
-    // 限制左右移動範圍
-    this.pos.x = constrain(this.pos.x, this.size, width - this.size);
-    
-    // --- 動畫恢復與漂浮 ---
-    // 顏色慢慢變回基礎色
-    this.bodyColor = lerpColor(this.bodyColor, this.baseColor, 0.1);
-    // 形狀慢慢恢復
-    this.squish = lerp(this.squish, 1.0 + (sin(millis()*0.005)*0.05), 0.1);
-    this.eyeSize = lerp(this.eyeSize, 15, 0.1);
-    // 觸手持續波動 (漂浮效果)
-    this.tentaclePhase += 0.1 + (abs(this.vel.y) * 0.02);
-  }
-  
-  display() {
-    push();
-    translate(this.pos.x, this.pos.y);
-    
-    // 根據垂直速度稍微旋轉身體
-    let rot = this.vel.y * 0.02;
-    rotate(rot);
-    
-    // 繪製觸手
-    noFill();
-    strokeWeight(4);
-    let alpha = 200;
-    for (let i = -2; i <= 2; i++) {
-      stroke(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), alpha);
-      let xOffset = i * 12;
-      
-      beginShape();
-      for (let j = 0; j < 10; j++) {
-        let yVal = (this.size/2) + (j * 8);
-        // 使用 sin 函數產生波動效果
-        let wave = sin(this.tentaclePhase + (i * 0.5) + (j * 0.3)) * (j * 1.5);
-        // 根據速度產生拖曳感
-        let dragLag = -this.vel.x * j * 0.5;
-        vertex(xOffset + wave + dragLag, yVal);
-      }
-      endShape();
+        // 產生粒子
+        for(let i=0; i<8; i++) bubbles.push(new Bubble(this.pos.x, this.pos.y + 30, true));
     }
     
-    // 繪製身體主體
-    scale(1.0, this.squish); // 應用擠壓變形
-    noStroke();
-    // 半透明內部
-    fill(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 150);
-    arc(0, 0, this.size * 2.2, this.size * 2, PI, TWO_PI);
-    // 底部封口
-    rect(-this.size * 1.1, 0, this.size * 2.2, this.size * 0.2);
-    
-    // 發光外框
-    noFill();
-    stroke(this.bodyColor);
-    strokeWeight(3);
-    arc(0, 0, this.size * 2, this.size * 1.8, PI, TWO_PI);
-    line(-this.size, 0, this.size, 0);
-    
-    // 繪製眼睛
-    let eyeY = -this.size * 0.3;
-    let eyeX = this.size * 0.4;
-    
-    // 眼白和發光
-    fill(255);
-    noStroke();
-    // 眼睛外發光圈
-    fill(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 100);
-    ellipse(-eyeX, eyeY, this.eyeSize + 15, this.eyeSize + 15);
-    ellipse(eyeX, eyeY, this.eyeSize + 15, this.eyeSize + 15);
-    // 眼白
-    fill(255);
-    ellipse(-eyeX, eyeY, this.eyeSize, this.eyeSize);
-    ellipse(eyeX, eyeY, this.eyeSize, this.eyeSize);
-    
-    // 眼珠 (會跟隨運動方向看)
-    fill(0);
-    let lookX = map(this.vel.x, -10, 10, -3, 3);
-    let lookY = map(this.vel.y, -20, 20, -5, 5);
-    ellipse(-eyeX + lookX, eyeY + lookY, this.eyeSize*0.6);
-    ellipse(eyeX + lookX, eyeY + lookY, this.eyeSize*0.6);
+    update() {
+        this.vel.y += this.gravity;
+        this.vel.mult(this.drag);
+        this.pos.add(this.vel);
         
-    pop();
-  }
+        // 左右限制
+        this.pos.x = constrain(this.pos.x, 30, width-30);
+        
+        // 動畫回復
+        this.squish = lerp(this.squish, 1.0 + sin(frameCount*0.1)*0.05, 0.1);
+        this.bodyColor = lerpColor(this.bodyColor, this.baseColor, 0.05);
+        this.eyeSize = lerp(this.eyeSize, 15, 0.1);
+        this.tentaclePhase += 0.1 + abs(this.vel.y)*0.05;
+    }
+    
+    display() {
+        push();
+        translate(this.pos.x, this.pos.y);
+        rotate(this.vel.y * 0.02);
+        
+        // 觸手
+        noFill(); strokeWeight(4);
+        for(let i=-2; i<=2; i++) {
+            stroke(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 200);
+            beginShape();
+            for(let j=0; j<10; j++) {
+                let wave = sin(this.tentaclePhase + i + j*0.5) * j*2;
+                vertex(i*10 + wave - this.vel.x*j*0.5, 30 + j*8);
+            }
+            endShape();
+        }
+        
+        // 身體
+        scale(1, this.squish);
+        noStroke(); fill(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 150);
+        arc(0, 0, this.size*2, this.size*1.8, PI, TWO_PI);
+        rect(-this.size, 0, this.size*2, 10);
+        
+        // 發光邊框
+        noFill(); stroke(this.bodyColor); strokeWeight(2);
+        arc(0, 0, this.size*1.8, this.size*1.6, PI, TWO_PI);
+        
+        // 眼睛
+        fill(255); noStroke();
+        ellipse(-20, -10, this.eyeSize+5); ellipse(20, -10, this.eyeSize+5);
+        fill(0);
+        ellipse(-20 + this.vel.x*0.5, -10 + this.vel.y*0.2, 5);
+        ellipse(20 + this.vel.x*0.5, -10 + this.vel.y*0.2, 5);
+        
+        pop();
+    }
 }
 
-// 背景氣泡類別 (直接沿用新版)
 class Bubble {
-  constructor(x, y, burst) {
-    this.isBurst = burst;
-    if (burst) {
-      // 如果是跳躍產生的爆發氣泡
-      this.pos = createVector(x, y);
-      this.size = random(5, 15);
-      this.speed = random(3, 7);
-      this.alpha = 255;
-    } else {
-      // 如果是背景漂浮氣泡
-      this.reset();
+    constructor(x, y, burst) {
+        this.isBurst = burst;
+        if(burst) {
+            this.pos = createVector(x, y);
+            this.size = random(5, 15);
+            this.speed = random(3, 8);
+            this.alpha = 255;
+        } else {
+            this.reset();
+        }
     }
-  }
-  
-  reset() {
-    this.pos = createVector(random(width), random(height + 100));
-    this.size = random(2, 6);
-    this.speed = random(0.5, 2.0);
-    this.isBurst = false;
-    this.alpha = random(50, 150);
-    this.oscOffset = random(TWO_PI);
-  }
-  
-  update() {
-    this.pos.y -= this.speed;
-    
-    if (this.isBurst) {
-      // 爆發氣泡會變小並消失
-      this.size *= 0.92;
-      this.alpha -= 10;
-      if (this.size < 0.5 || this.alpha < 0) {
-        this.pos.y = -100; // 移出畫面等待回收 (這裡簡單處理，不重置)
-      }
-    } else {
-      // 背景氣泡會左右搖擺
-      this.pos.x += sin(millis() * 0.002 + this.oscOffset) * 0.3;
-      // 超出頂部後重置到底部
-      if (this.pos.y < -50) this.reset();
+    reset() {
+        this.pos = createVector(random(width), random(height));
+        this.size = random(2, 6);
+        this.speed = random(0.5, 2);
+        this.alpha = random(50, 150);
+        this.isBurst = false;
     }
-  }
-  
-  display() {
-    if (this.alpha <= 0) return;
-    noStroke();
-    if (this.isBurst) fill(100, 255, 255, this.alpha);
-    else fill(200, 255, 255, this.alpha);
-    ellipse(this.pos.x, this.pos.y, this.size);
-  }
+    update() {
+        this.pos.y -= this.speed;
+        if(this.isBurst) {
+            this.size *= 0.9;
+            this.alpha -= 10;
+            if(this.alpha < 0) this.pos.y = -100;
+        } else {
+            if(this.pos.y < -10) this.reset();
+        }
+    }
+    display() {
+        if(this.alpha <= 0) return;
+        noStroke(); fill(200, 255, 255, this.alpha);
+        ellipse(this.pos.x, this.pos.y, this.size);
+    }
 }
 </script>
 </body>
