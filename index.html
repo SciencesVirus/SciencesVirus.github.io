@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid (Tone.js Version)</title>
+  <title>Cyber Squid - Gravity Sound Edition</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -13,48 +13,67 @@
     
     #overlay {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0, 10, 20, 0.9);
+      background: linear-gradient(to bottom, #051020, #000);
       display: flex; flex-direction: column;
       justify-content: center; align-items: center; z-index: 999;
       color: #0ff; text-align: center;
     }
     
     button {
-      padding: 15px 40px; font-size: 24px; color: #0ff;
-      background: transparent; border: 2px solid #0ff; border-radius: 5px;
-      cursor: pointer; margin-top: 20px;
-      box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
+      padding: 15px 40px; font-size: 20px; color: #0ff;
+      background: rgba(0, 255, 255, 0.1); border: 2px solid #0ff; border-radius: 5px;
+      cursor: pointer; margin-top: 30px; letter-spacing: 2px;
+      box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
+      transition: all 0.2s;
     }
+    button:active { background: #0ff; color: #000; }
     
     #status-bar {
-      position: absolute; top: 10px; right: 10px; color: rgba(0,255,255,0.7);
-      font-size: 14px; pointer-events: none;
+      position: absolute; top: 10px; right: 10px; color: rgba(0,255,255,0.5);
+      font-size: 12px; pointer-events: none;
     }
   </style>
 </head>
 <body>
 
-  <div id="status-bar">Audio Engine: Tone.js</div>
+  <div id="status-bar">Audio: Split Logic (Jump/Fall)</div>
 
   <div id="overlay">
-    <h1 style="text-shadow: 0 0 20px #0ff;">CYBER SQUID</h1>
-    <p>Tone.js Procedural Sound</p>
-    <button id="start-btn">START DIVE</button>
-    <p style="font-size: 12px; margin-top: 15px; opacity: 0.7;">請關閉靜音模式 (Turn off Silent Mode)</p>
+    <h1 style="text-shadow: 0 0 20px #0ff; font-size: 40px; margin-bottom: 0;">CYBER SQUID</h1>
+    <p style="color: #0aa; font-size: 14px;">GRAVITY RESONANCE SYSTEM</p>
+    <button id="start-btn">INITIALIZE</button>
+    <p style="font-size: 12px; margin-top: 20px; opacity: 0.6;">Tap to Jump • Listen to Gravity</p>
   </div>
 
 <script>
 // ==========================================
-//  PART 1: Tone.js 聲音邏輯 (Bouncing Ball)
+//  PART 1: 雙重聲音系統 (Jump vs Fall)
 // ==========================================
-let bounceSynth;
+let jumpSynth;   // 負責跳躍的純音
+let fallSynth;   // 負責掉落的彈跳聲
 let isAudioReady = false;
+
+// 掉落聲音的計時器 ID (用來在跳躍時取消掉落聲)
+let fallTimeoutID = null;
+let isFallingSoundPlaying = false;
 
 async function initAudio() {
     await Tone.start();
     
-    // 建立合成器 (簡單的正弦波)
-    bounceSynth = new Tone.Synth({
+    // 1. 跳躍合成器 (乾淨的純音)
+    jumpSynth = new Tone.Synth({
+        oscillator: { type: "triangle" }, // 三角波比較溫潤，不像正弦波那麼單薄
+        envelope: {
+            attack: 0.005,
+            decay: 0.3,
+            sustain: 0,
+            release: 0.1
+        }
+    }).toDestination();
+    jumpSynth.volume.value = -8;
+
+    // 2. 掉落合成器 (彈跳球效果，稍微短促一點)
+    fallSynth = new Tone.Synth({
         oscillator: { type: "sine" },
         envelope: {
             attack: 0.005,
@@ -63,55 +82,78 @@ async function initAudio() {
             release: 0.1
         }
     }).toDestination();
-    
-    // 調整音量
-    bounceSynth.volume.value = -5;
+    fallSynth.volume.value = -10;
 
     isAudioReady = true;
     document.getElementById('overlay').style.display = 'none';
-    
-    // 開始遊戲迴圈
     startGame();
 }
 
-// ★ 核心聲音演算法：遞減的時間間隔 ★
-function triggerBouncingSound(power) {
+// --- A. 跳躍聲音 (Pure Tone) ---
+function playJumpSound(power) {
     if (!isAudioReady) return;
-
-    // 根據力道決定：起始頻率(高低) 與 起始間隔(快慢)
-    let startPitch = map(power, 0.1, 1.0, 300, 1200);
-    let startGap = map(power, 0.1, 1.0, 0.15, 0.4);
     
-    let now = Tone.now();
-    let currentGap = startGap;
-    let currentPitch = startPitch;
-    let currentVol = 0; // dB
+    // ★ 如果正在播放掉落聲，立刻切斷它！(因為玩家重新獲得動力了) ★
+    stopFallingSequence();
 
-    // 預排 10 次彈跳
-    for (let i = 0; i < 10; i++) {
-        // 如果頻率太低或間隔太短就停止
-        if (currentPitch < 50 || currentGap < 0.01) break;
+    // 根據力道 (0.0 ~ 1.0) 決定音高
+    // 力道越大，音越高 (400Hz ~ 800Hz)
+    let pitch = map(power, 0.0, 1.0, 400, 800);
+    
+    jumpSynth.triggerAttackRelease(pitch, "8n");
+}
 
-        bounceSynth.triggerAttackRelease(
-            currentPitch,
-            currentGap * 0.8, // 音符長度比間隔短一點
-            now,
-            Tone.dbToGain(currentVol) // 轉成 Gain
-        );
+// --- B. 掉落聲音 (Bouncing Ball Effect) ---
+function startFallingSequence() {
+    if (!isAudioReady || isFallingSoundPlaying) return;
+    
+    isFallingSoundPlaying = true;
+    
+    // 參數設定
+    let currentPitch = 1000; // 從高頻開始掉
+    let currentGap = 0.15;   // 初始間隔 (秒)
+    let currentVol = -5;     // 初始音量 (dB)
+    
+    // 定義遞迴函數
+    function playBeat() {
+        if (!isFallingSoundPlaying) return; // 被中斷就停止
 
-        // 下一次的時間點
-        now += currentGap;
+        let now = Tone.now();
         
-        // ★ 物理衰減公式 ★
-        currentGap *= 0.75;    // 時間變快 (間隔變短)
-        currentPitch *= 0.85;  // 音高變低
-        currentVol -= 3;       // 音量變小 (-3dB)
+        // 播放一個短音
+        fallSynth.triggerAttackRelease(currentPitch, currentGap * 0.8, now, Tone.dbToGain(currentVol));
+
+        // 計算下一次的變化 (物理衰減模擬)
+        currentPitch *= 0.85; // 音高降低
+        currentGap *= 0.8;    // 速度變快 (間隔變短)
+        currentVol -= 2;      // 音量變小
+        
+        // 停止條件：頻率太低 或 間隔太密
+        if (currentPitch > 100 && currentGap > 0.02) {
+            // 預排下一次聲音
+            // 注意：這裡我們用 setTimeout 配合 Tone.now 來實現簡單排程
+            // 因為要能在外部中斷，我們把 ID 存起來
+            fallTimeoutID = setTimeout(playBeat, currentGap * 1000);
+        } else {
+            isFallingSoundPlaying = false;
+        }
+    }
+    
+    // 啟動序列
+    playBeat();
+}
+
+function stopFallingSequence() {
+    isFallingSoundPlaying = false;
+    if (fallTimeoutID) {
+        clearTimeout(fallTimeoutID);
+        fallTimeoutID = null;
     }
 }
 
 
 // ==========================================
-//  PART 2: p5.js 遊戲與視覺
+//  PART 2: p5.js 遊戲邏輯
 // ==========================================
 let squid;
 let bubbles = [];
@@ -123,9 +165,8 @@ function setup() {
     squid = new TechSquid(width/2, height/2);
     for(let i=0; i<30; i++) bubbles.push(new Bubble());
     
-    // 綁定按鈕
     document.getElementById('start-btn').addEventListener('click', initAudio);
-    noLoop(); // 等待按鈕點擊
+    noLoop();
 }
 
 function startGame() {
@@ -148,33 +189,41 @@ function draw() {
         squid.update();
         squid.display();
         
-        // 邊界檢查 (碰到上下都死)
-        if (squid.pos.y > height + 50 || squid.pos.y < -50) {
+        // ★ 核心邏輯：偵測掉落 ★
+        // 如果速度向下 (vel.y > 0) 且 還沒播放掉落聲 -> 觸發
+        // 加一個 threshold (1.0) 避免在頂點輕微晃動時一直觸發
+        if (squid.vel.y > 1.5 && !isFallingSoundPlaying) {
+            startFallingSequence();
+        }
+
+        // 邊界檢查
+        if (squid.pos.y > height + 60 || squid.pos.y < -60) {
             gameOver();
         }
         
-        // 分數顯示
+        // 分數
         score += 0.05;
-        fill(255); textSize(20); textAlign(LEFT, TOP);
+        fill(255); textSize(16); textAlign(LEFT, TOP);
         text("DEPTH: " + floor(score) + "m", 20, 20);
         
     } else if (gameState === 2) {
         squid.display();
         fill(255, 50, 50); textSize(50); textAlign(CENTER, CENTER);
-        text("GAME OVER", width/2, height/2);
-        textSize(20); fill(255);
-        text("Tap to Retry", width/2, height/2 + 50);
+        text("SIGNAL LOST", width/2, height/2);
+        textSize(16); fill(255);
+        text("Tap to Reboot System", width/2, height/2 + 50);
     }
 }
 
 function gameOver() {
     gameState = 2;
-    // 播放一個失敗音效
+    stopFallingSequence(); // 遊戲結束停止掉落聲
+    
     if(isAudioReady) {
-        const now = Tone.now();
-        const osc = new Tone.Oscillator(150, "sawtooth").toDestination().start(now);
-        osc.frequency.rampTo(50, 0.5, now);
-        osc.stop(now + 0.5);
+        // Game Over 音效
+        const osc = new Tone.Oscillator(100, "sawtooth").toDestination().start();
+        osc.frequency.rampTo(20, 1);
+        osc.stop("+1");
     }
 }
 
@@ -182,15 +231,14 @@ function mousePressed() {
     if (!isAudioReady) return;
 
     if (gameState === 1) {
-        // 遊戲中：跳躍 + 聲音
-        let power = random(0.5, 0.9); // 模擬隨機力度
+        // ★ 點擊時：只觸發跳躍 ★
+        let power = random(0.6, 0.9); // 模擬力度
         squid.jump(power);
-        triggerBouncingSound(power); // ★ 呼叫 Tone.js 聲音
+        playJumpSound(power); // 播放純音 (並切斷掉落聲)
     } else if (gameState === 2) {
-        // 結束時：重來
         startGame();
     }
-    return false;
+    return false; // 防止手機雙擊縮放
 }
 
 function windowResized() {
@@ -198,7 +246,6 @@ function windowResized() {
     squid.pos.x = width/2;
 }
 
-// 背景漸層
 function drawBackground() {
     let ctx = drawingContext;
     let gradient = ctx.createLinearGradient(0, 0, 0, height);
@@ -209,7 +256,7 @@ function drawBackground() {
 }
 
 // ==========================================
-//  PART 3: 章魚與氣泡類別
+//  PART 3: 章魚與氣泡類別 (Cyber Squid Visuals)
 // ==========================================
 class TechSquid {
     constructor(x, y) {
@@ -221,7 +268,7 @@ class TechSquid {
     reset(x, y) {
         this.pos = createVector(x, y);
         this.vel = createVector(0, 0);
-        this.gravity = 0.4;
+        this.gravity = 0.35; // 稍微調輕一點，讓掉落感更明顯
         this.drag = 0.96;
         this.bodyColor = this.baseColor;
         this.squish = 1.0;
@@ -230,12 +277,12 @@ class TechSquid {
     }
     
     jump(power) {
-        this.vel.y = -10 - (power * 2); // 向上跳
-        this.squish = 0.7;
-        this.bodyColor = color(255, 50, 255);
+        this.vel.y = -10 - (power * 3);
+        this.squish = 0.6;
+        this.bodyColor = color(255, 50, 255); // 跳躍變紫
         this.eyeSize = 25;
         
-        // 產生粒子
+        // 粒子
         for(let i=0; i<8; i++) bubbles.push(new Bubble(this.pos.x, this.pos.y + 30, true));
     }
     
@@ -243,11 +290,9 @@ class TechSquid {
         this.vel.y += this.gravity;
         this.vel.mult(this.drag);
         this.pos.add(this.vel);
-        
-        // 左右限制
         this.pos.x = constrain(this.pos.x, 30, width-30);
         
-        // 動畫回復
+        // 動畫
         this.squish = lerp(this.squish, 1.0 + sin(frameCount*0.1)*0.05, 0.1);
         this.bodyColor = lerpColor(this.bodyColor, this.baseColor, 0.05);
         this.eyeSize = lerp(this.eyeSize, 15, 0.1);
@@ -259,7 +304,7 @@ class TechSquid {
         translate(this.pos.x, this.pos.y);
         rotate(this.vel.y * 0.02);
         
-        // 觸手
+        // 觸手 (Neon Glow)
         noFill(); strokeWeight(4);
         for(let i=-2; i<=2; i++) {
             stroke(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 200);
@@ -277,16 +322,17 @@ class TechSquid {
         arc(0, 0, this.size*2, this.size*1.8, PI, TWO_PI);
         rect(-this.size, 0, this.size*2, 10);
         
-        // 發光邊框
+        // 外框
         noFill(); stroke(this.bodyColor); strokeWeight(2);
         arc(0, 0, this.size*1.8, this.size*1.6, PI, TWO_PI);
         
         // 眼睛
+        let eyeY = -10;
         fill(255); noStroke();
-        ellipse(-20, -10, this.eyeSize+5); ellipse(20, -10, this.eyeSize+5);
-        fill(0);
-        ellipse(-20 + this.vel.x*0.5, -10 + this.vel.y*0.2, 5);
-        ellipse(20 + this.vel.x*0.5, -10 + this.vel.y*0.2, 5);
+        ellipse(-20, eyeY, this.eyeSize+5); ellipse(20, eyeY, this.eyeSize+5);
+        fill(0); // 眼珠
+        ellipse(-20 + this.vel.x*0.5, eyeY + this.vel.y*0.2, 5);
+        ellipse(20 + this.vel.x*0.5, eyeY + this.vel.y*0.2, 5);
         
         pop();
     }
