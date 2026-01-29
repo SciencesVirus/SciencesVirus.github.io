@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Death Fix</title>
+  <title>Cyber Squid - Victory Edition</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -78,7 +78,9 @@
         top: 30%;
     }
     
-    #status-msg { margin-top: 15px; font-size: 14px; color: #888; }
+    #status-msg {
+        margin-top: 15px; font-size: 14px; color: #888;
+    }
     
     @keyframes floatUp {
         0% { transform: translateY(0) scale(1); opacity: 1; }
@@ -100,29 +102,38 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">完美運行版</p>
+    <p style="color: #0aa; font-size: 20px;">通關挑戰版</p>
     <button id="start-btn">開始冒險</button>
     <p id="status-msg">請點擊按鈕以啟動音效</p>
   </div>
 
 <script>
 // ==========================================
-//  PART 1: 聲音系統
+//  PART 1: 聲音系統 (音效池技術)
 // ==========================================
-let jumpSynth, fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, dieSynth;
+let jumpSynth, fallSynth, collisionSynth, levelUpSynth, jackpotSynth, dieSynth;
+// ★ 使用陣列來做音效池，取代 PolySynth ★
+let pearlSynths = [];
+let pearlSynthIndex = 0;
+
 let isAudioReady = false;
 let audioInitStarted = false;
 let lastJumpPitch = 600;
 let fallTimeoutID = null;
 let isFallingSoundPlaying = false;
 
-const noteMap = ["C5", "D5", "E5", "G5", "A5", "C6", "D6", "E6", "G6", "A6", "C7", "E7", "G7"];
+const noteMap = [
+    "C5", "D5", "E5", "G5", "A5",
+    "C6", "D6", "E6", "G6", "A6",
+    "C7", "E7", "G7"
+];
 
 async function initAudio() {
     if (audioInitStarted) return;
     audioInitStarted = true;
     
     const btn = document.getElementById('start-btn');
+    const msg = document.getElementById('status-msg');
     btn.innerText = "啟動中...";
     
     try {
@@ -130,37 +141,46 @@ async function initAudio() {
         if (Tone.context.state !== 'running') await Tone.context.resume();
         Tone.Destination.volume.value = 0;
 
+        // 1. Jump
         jumpSynth = new Tone.Synth({
             oscillator: { type: "sine" },
             envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 }
         }).toDestination();
         jumpSynth.volume.value = -2;
 
+        // 2. Fall
         fallSynth = new Tone.Synth({
             oscillator: { type: "sine" },
             envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
         }).toDestination();
         fallSynth.volume.value = -5;
 
-        collectSynth = new Tone.PolySynth(Tone.Synth, {
-            maxPolyphony: 64,
-            oscillator: { type: "triangle" },
-            envelope: { attack: 0.005, decay: 0.05, sustain: 0, release: 0.05 }
-        }).toDestination();
-        collectSynth.volume.value = -4;
+        // 3. ★ Collect (音效池 - 絕對不會漏音) ★
+        // 建立 10 個獨立的合成器，輪流使用
+        for(let i=0; i<10; i++) {
+            let s = new Tone.Synth({
+                oscillator: { type: "square" }, // 方波最清楚
+                envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
+            }).toDestination();
+            s.volume.value = -10;
+            pearlSynths.push(s);
+        }
         
+        // 4. Level Up
         levelUpSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "sawtooth" },
             envelope: { attack: 0.05, decay: 0.5, sustain: 0.3, release: 1.5 }
         }).toDestination();
         levelUpSynth.volume.value = -8;
 
+        // 5. Jackpot
         jackpotSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "triangle" },
             envelope: { attack: 0.1, decay: 0.5, sustain: 0.3, release: 1.0 }
         }).toDestination();
         jackpotSynth.volume.value = -12;
 
+        // 6. Collision
         collisionSynth = new Tone.FMSynth({
             harmonicity: 3.0, modulationIndex: 10, oscillator: { type: "sine" }, modulation: { type: "square" },
             envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 },
@@ -168,6 +188,7 @@ async function initAudio() {
         }).toDestination();
         collisionSynth.volume.value = -2;
         
+        // 7. Death
         dieSynth = new Tone.NoiseSynth({
             noise: { type: "brown" },
             envelope: { attack: 0.01, decay: 0.5, sustain: 0 }
@@ -178,6 +199,7 @@ async function initAudio() {
         testBeep.triggerAttackRelease("C6", "32n");
 
         isAudioReady = true;
+        
         document.getElementById('overlay').style.display = 'none';
         document.getElementById('hud').style.display = 'block';
         document.getElementById('hp-bar').style.display = 'block';
@@ -185,7 +207,8 @@ async function initAudio() {
 
     } catch (e) {
         console.error("Audio Init Error:", e);
-        document.getElementById('status-msg').innerText = "音效啟動失敗";
+        msg.innerText = "音效啟動失敗";
+        msg.style.color = "red";
     }
 }
 
@@ -203,12 +226,18 @@ function playJumpSound(power) {
     try { jumpSynth.triggerAttackRelease(pitch, "8n"); } catch(e){}
 }
 
+// ★ 使用音效池播放 ★
 function playCollectSound(comboIndex) {
     if (!isAudioReady) return;
     let index = (comboIndex % 10);
-    let rootNote = noteMap[index];
-    let harmNote = noteMap[(index + 2) % noteMap.length];
-    try { collectSynth.triggerAttackRelease([rootNote, harmNote], "32n", undefined, 1.0); } catch(e){}
+    let note = noteMap[index];
+    
+    try {
+        // 從池中拿出一個合成器來播放
+        pearlSynths[pearlSynthIndex].triggerAttackRelease(note, "32n");
+        // 指向下一個合成器
+        pearlSynthIndex = (pearlSynthIndex + 1) % pearlSynths.length;
+    } catch(e){}
 }
 
 function playLevelUpSound() {
@@ -255,12 +284,18 @@ function stopFallingSequence() {
 }
 
 // ==========================================
-//  PART 2: 遊戲邏輯 (死亡修正)
+//  PART 2: 遊戲邏輯 (通關 & 凍結)
 // ==========================================
 let squid;
 let particles = []; let stars = []; let terrain; let pearls = [];
-let gameState = 0; let score = 0; let gameSpeed = 3; let shakeAmount = 0; let canRestart = false;
-let comboCount = 0; let comboTimer = 0; const COMBO_TIME_LIMIT = 300;
+// gameState: 0=Init, 1=Play, 2=Dead, 3=Victory
+let gameState = 0;
+let score = 0; let gameSpeed = 3; let shakeAmount = 0; let canRestart = false;
+
+let comboCount = 0;
+let comboTimer = 0;
+const COMBO_TIME_LIMIT = 300;
+const VICTORY_COMBO = 60; // 50(金) + 10 = 60
 
 function setup() {
     createCanvas(windowWidth, windowHeight);
@@ -333,10 +368,17 @@ function draw() {
         if(shakeAmount < 0.5) shakeAmount = 0;
     }
     
-    drawBackground();
+    // 如果通關，畫金色背景
+    if (gameState === 3) {
+        let ctx = drawingContext;
+        let g = ctx.createLinearGradient(0, 0, 0, height);
+        g.addColorStop(0, "#FFFFE0"); g.addColorStop(1, "#FFD700");
+        ctx.fillStyle = g; ctx.fillRect(0,0,width,height);
+    } else {
+        drawBackground();
+    }
 
     if (gameState === 1) {
-        // ★ 正常遊戲時更新速度 ★
         gameSpeed += 0.0002;
         
         let hasPearlOnScreen = pearls.some(p => p.pos.x > 0 && p.pos.x < width);
@@ -345,7 +387,7 @@ function draw() {
             if (comboTimer <= 0) comboCount = 0;
         }
         
-        terrain.update(); // 地形移動
+        terrain.update();
         terrain.display();
 
         if (frameCount % 80 === 0 && random() > 0.2) {
@@ -372,7 +414,10 @@ function draw() {
                     for(let k=0; k<20; k++) stars.push(new StarParticle(p.pos.x, p.pos.y));
                 }
                 
-                if (comboCount > 0 && comboCount % 10 === 0) {
+                // ★ 通關判定 ★
+                if (comboCount >= VICTORY_COMBO) {
+                    triggerVictory();
+                } else if (comboCount > 0 && comboCount % 10 === 0) {
                     playJackpotSound();
                     score += 1000;
                     showJackpotText();
@@ -423,13 +468,12 @@ function draw() {
         document.getElementById('score-val').innerText = score;
 
     } else if (gameState === 2) {
-        // ★ 死亡時，地形不更新，只顯示 ★
+        // ★ 死亡狀態：地形停止更新，只繪製 ★
         terrain.display();
         
         squid.updatePhysicsOnly();
         squid.display();
         
-        // 判斷是否掉出螢幕
         if (squid.pos.y > height + 100) {
             fill(255, 50, 50); textSize(60); textAlign(CENTER, CENTER);
             text("GAME OVER", width/2, height/2 - 20);
@@ -441,18 +485,35 @@ function draw() {
                 text("點擊畫面 重新開始", width/2, height/2 + 60);
             }
         }
+    } else if (gameState === 3) {
+        // ★ 通關狀態 ★
+        fill(0); textSize(60); textAlign(CENTER, CENTER);
+        text("VICTORY!", width/2, height/2 - 40);
+        text("完全制霸", width/2, height/2 + 40);
+        
+        textSize(30);
+        if (frameCount % 60 < 30) text("點擊畫面 重新挑戰", width/2, height/2 + 120);
+        
+        // 畫一些星星慶祝
+        if (random() > 0.5) stars.push(new StarParticle(random(width), random(height)));
+        for (let i = stars.length - 1; i >= 0; i--) {
+            stars[i].update(); stars[i].display();
+            if (stars[i].finished()) stars.splice(i, 1);
+        }
     }
     
-    if (random() > 0.8) particles.push(new Bubble(width, random(height), false));
+    // 粒子 (共用)
+    if (gameState !== 3 && random() > 0.8) particles.push(new Bubble(width, random(height), false));
     for (let i = particles.length - 1; i >= 0; i--) {
         particles[i].update();
         particles[i].display();
         if (particles[i].finished()) particles.splice(i, 1);
     }
-    for (let i = stars.length - 1; i >= 0; i--) {
-        stars[i].update();
-        stars[i].display();
-        if (stars[i].finished()) stars.splice(i, 1);
+    if(gameState !== 3) {
+        for (let i = stars.length - 1; i >= 0; i--) {
+            stars[i].update(); stars[i].display();
+            if (stars[i].finished()) stars.splice(i, 1);
+        }
     }
     
     if (gameState === 1 && comboCount > 0) {
@@ -470,20 +531,26 @@ function draw() {
 function screenPosition(x, y) { return x; }
 
 function triggerDeath() {
-    gameState = 2; // 切換狀態
-    stopFallingSequence(); // 停止掉落音效
+    gameState = 2; // 進入死亡狀態 (地形凍結)
+    stopFallingSequence();
     playDieSound();
     squid.explode();
-    
-    // 產生爆炸效果
     for(let k=0; k<20; k++) {
         let b = new Bubble(squid.pos.x, squid.pos.y, true);
         b.vel = p5.Vector.random2D().mult(random(5, 10));
         particles.push(b);
     }
-    
     canRestart = false;
     setTimeout(() => { canRestart = true; }, 1500);
+}
+
+function triggerVictory() {
+    gameState = 3; // 進入通關狀態
+    stopFallingSequence();
+    playJackpotSound();
+    playLevelUpSound();
+    canRestart = false;
+    setTimeout(() => { canRestart = true; }, 2000);
 }
 
 function handleInput(e) {
@@ -493,7 +560,7 @@ function handleInput(e) {
         let power = random(0.6, 0.9);
         squid.jump(power);
         playJumpSound(power);
-    } else if (gameState === 2 && canRestart) {
+    } else if ((gameState === 2 || gameState === 3) && canRestart) {
         squid.evolutionLevel = 0;
         startGame();
     }
@@ -518,7 +585,7 @@ function drawBackground() {
 }
 
 // ==========================================
-//  PART 3: 類別 (完全一致)
+//  PART 3: 類別
 // ==========================================
 
 class CaveObstacle {
@@ -540,12 +607,10 @@ class CaveObstacle {
         push(); translate(this.pos.x, this.pos.y);
         if (this.type === 'starfish') {
             rotate(this.angle + this.timer * 0.5); noStroke(); fill(255, 100, 100);
-            beginShape();
-            for (let i = 0; i < 5; i++) {
+            beginShape(); for (let i = 0; i < 5; i++) {
                 let a = TWO_PI * i / 5 - HALF_PI; let r = this.size / 2;
                 vertex(cos(a) * r, sin(a) * r); a += TWO_PI / 10; vertex(cos(a) * r * 0.4, sin(a) * r * 0.4);
-            }
-            endShape(CLOSE); fill(255, 200); ellipse(0, 0, 5, 5);
+            } endShape(CLOSE); fill(255, 200); ellipse(0, 0, 5, 5);
         } else if (this.type === 'eel') {
             let sway = sin(this.timer) * 15; let dir = (this.side === 'top') ? 1 : -1;
             noFill(); stroke(240); strokeWeight(14);
