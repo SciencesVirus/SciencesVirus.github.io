@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Infinite Evolution</title>
+  <title>Cyber Squid - Evolution</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -34,7 +34,7 @@
     
     #hp-bar {
         position: absolute; top: 20px; right: 20px;
-        font-size: 24px; color: #ff5555; text-shadow: 0 0 5px #f00;
+        font-size: 30px; color: #ff5555; text-shadow: 0 0 5px #f00;
         display: none;
         text-align: right;
     }
@@ -54,14 +54,14 @@
         position: absolute;
         color: #FFD700;
         font-weight: bold;
-        font-size: 40px;
+        font-size: 50px;
         pointer-events: none;
         animation: zoomOut 2s forwards;
-        text-shadow: 0 0 20px #ffffff;
+        text-shadow: 0 0 30px #ffffff;
         z-index: 20;
         width: 100%;
         text-align: center;
-        top: 40%;
+        top: 35%;
     }
     
     @keyframes floatUp {
@@ -84,15 +84,15 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">無限進化版</p>
+    <p style="color: #0aa; font-size: 20px;">無限進化 • 智慧 Combo</p>
     <button id="start-btn">開始冒險</button>
   </div>
 
 <script>
 // ==========================================
-//  PART 1: 聲音系統 (黃金變聲)
+//  PART 1: 聲音系統
 // ==========================================
-let jumpSynth, fallSynth, collectSynth, collisionSynth, jackpotSynth;
+let jumpSynth, fallSynth, collectSynth, collisionSynth, jackpotSynth, dieSynth;
 let isAudioReady = false;
 let lastJumpPitch = 600;
 let fallTimeoutID = null;
@@ -107,42 +107,45 @@ const noteMap = [
 async function initAudio() {
     await Tone.start();
     
-    // 1. 跳躍 (預設 Sine)
     jumpSynth = new Tone.Synth({
         oscillator: { type: "sine" },
         envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 }
     }).toDestination();
     jumpSynth.volume.value = -2;
 
-    // 2. 掉落 (預設 Sine)
     fallSynth = new Tone.Synth({
         oscillator: { type: "sine" },
         envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
     }).toDestination();
     fallSynth.volume.value = -5;
 
-    // 3. 收集 (水晶聲)
-    collectSynth = new Tone.PolySynth(Tone.AMSynth, {
-        harmonicity: 2.5, oscillator: { type: "square" },
-        envelope: { attack: 0.005, decay: 0.2, sustain: 0, release: 1.0 },
-        modulation: { type: "sine" }, modulationEnvelope: { attack: 0.005, decay: 0.3, sustain: 0, release: 0.5 }
+    // 收集聲 (PolySynth Triangle)
+    collectSynth = new Tone.PolySynth(Tone.Synth, {
+        maxPolyphony: 32,
+        oscillator: { type: "triangle" },
+        envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.5 }
     }).toDestination();
-    collectSynth.volume.value = -4;
+    collectSynth.volume.value = -5;
     
-    // 4. Jackpot (溫柔和聲)
+    // 過關聲 (神聖和弦)
     jackpotSynth = new Tone.PolySynth(Tone.Synth, {
         oscillator: { type: "triangle" },
-        envelope: { attack: 0.2, decay: 0.5, sustain: 0.5, release: 2.0 }
+        envelope: { attack: 0.1, decay: 1.0, sustain: 0.5, release: 3.0 }
     }).toDestination();
-    jackpotSynth.volume.value = -10;
+    jackpotSynth.volume.value = -8;
 
-    // 5. 碰撞
     collisionSynth = new Tone.FMSynth({
         harmonicity: 3.0, modulationIndex: 10, oscillator: { type: "sine" }, modulation: { type: "square" },
         envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 },
         modulationEnvelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 }
     }).toDestination();
     collisionSynth.volume.value = -2;
+    
+    dieSynth = new Tone.NoiseSynth({
+        noise: { type: "brown" },
+        envelope: { attack: 0.01, decay: 0.5, sustain: 0 }
+    }).toDestination();
+    dieSynth.volume.value = -2;
 
     isAudioReady = true;
     document.getElementById('overlay').style.display = 'none';
@@ -157,15 +160,14 @@ function playJumpSound(power) {
     let pitch = map(power, 0.0, 1.0, 300, 700);
     lastJumpPitch = pitch;
     
-    // ★ 黃金模式變聲：方波 (Square Wave) ★
-    if (squid && squid.isGolden) {
+    // 高階進化時聲音變強
+    if (squid && squid.evolutionLevel >= 5) {
         jumpSynth.oscillator.type = "square";
-        jumpSynth.volume.value = -8; // Square 比較大聲，稍微關小
+        jumpSynth.volume.value = -8;
     } else {
         jumpSynth.oscillator.type = "sine";
         jumpSynth.volume.value = -2;
     }
-    
     jumpSynth.triggerAttackRelease(pitch, "8n");
 }
 
@@ -179,13 +181,21 @@ function playCollectSound(comboIndex) {
 
 function playJackpotSound() {
     if (!isAudioReady) return;
-    jackpotSynth.triggerAttackRelease(["C5", "E5", "G5", "C6"], "1n");
+    // 播放 C 大調七和弦，神聖感
+    jackpotSynth.triggerAttackRelease(["C4", "G4", "C5", "E5", "G5", "B5", "C6"], "1n");
 }
 
 function playCollisionSound() {
     if (!isAudioReady) return;
     collisionSynth.triggerAttackRelease("C3", "8n");
     collisionSynth.frequency.rampTo("C2", 0.1);
+}
+
+function playDieSound() {
+    if (!isAudioReady) return;
+    dieSynth.triggerAttackRelease("4n");
+    collisionSynth.triggerAttackRelease("C2", "2n");
+    collisionSynth.frequency.rampTo("C1", 1);
 }
 
 function startFallingSequence() {
@@ -195,8 +205,7 @@ function startFallingSequence() {
     let currentGap = 0.15;
     let currentVol = -5;
     
-    // ★ 掉落聲也跟著變身 ★
-    if (squid && squid.isGolden) {
+    if (squid && squid.evolutionLevel >= 5) {
         fallSynth.oscillator.type = "square";
         fallSynth.volume.value = -10;
     } else {
@@ -221,7 +230,7 @@ function stopFallingSequence() {
 }
 
 // ==========================================
-//  PART 2: 遊戲邏輯 (UI 修正 & 無限愛心)
+//  PART 2: 遊戲邏輯 (進化 & 智慧Combo)
 // ==========================================
 let squid;
 let particles = [];
@@ -233,10 +242,14 @@ let score = 0;
 let gameSpeed = 3;
 let shakeAmount = 0;
 let canRestart = false;
+let flashScreen = 0; // 過關閃光
 
 let comboCount = 0;
 let comboTimer = 0;
 const COMBO_TIME_LIMIT = 300;
+// 觸發進化的門檻：每 1 個 Combo 就進化一次！
+// 觸發過關的門檻：8 連鎖
+const WIN_COMBO = 8;
 
 function setup() {
     createCanvas(windowWidth, windowHeight);
@@ -256,6 +269,7 @@ function startGame() {
     gameSpeed = 3.5;
     comboCount = 0;
     comboTimer = 0;
+    flashScreen = 0;
     squid.reset(width * 0.25, height/2);
     terrain.reset(true);
     
@@ -266,34 +280,20 @@ function startGame() {
     loop();
 }
 
-// ★ 愛心進化顯示系統 ★
 function updateHPDisplay() {
     let hp = squid.hp;
     let hpElement = document.getElementById('hp-bar');
     let heartSymbol = "❤";
-    let color = "#ff5555"; // 預設紅
+    let color = "#ff5555";
     
-    // 根據血量改變顏色與符號
-    if (hp > 20) {
-        heartSymbol = "👑"; // 20+ 皇冠
-        color = "#ffd700"; // 金
-    } else if (hp > 10) {
-        heartSymbol = "💛"; // 10+ 黃金心
-        color = "#ffff00";
-    } else if (hp > 5) {
-        heartSymbol = "💙"; // 5+ 藍鑽心
-        color = "#00ffff";
-    }
+    if (hp > 20) { heartSymbol = "👑"; color = "#ffd700"; }
+    else if (hp > 10) { heartSymbol = "💛"; color = "#ffff00"; }
+    else if (hp > 5) { heartSymbol = "💙"; color = "#00ffff"; }
 
-    // 顯示邏輯：太多顆就用數字顯示，不然會超出螢幕
-    if (hp > 15) {
-        hpElement.innerText = heartSymbol + " x" + hp;
-    } else {
-        let str = "";
-        for(let i=0; i<hp; i++) str += heartSymbol;
-        hpElement.innerText = str;
+    if (hp > 15) { hpElement.innerText = heartSymbol + " x" + hp; }
+    else {
+        let str = ""; for(let i=0; i<hp; i++) str += heartSymbol; hpElement.innerText = str;
     }
-    
     hpElement.style.color = color;
     hpElement.style.textShadow = `0 0 5px ${color}`;
 }
@@ -312,9 +312,9 @@ function showComboText(x, y, count) {
 function showJackpotText() {
     let el = document.createElement('div');
     el.className = 'jackpot-text';
-    el.innerHTML = "JACKPOT!<br>SUPER SQUID MODE!";
+    el.innerHTML = "STAGE CLEARED!<br>ULTIMATE EVOLUTION!";
     document.body.appendChild(el);
-    setTimeout(() => { document.body.removeChild(el); }, 2000);
+    setTimeout(() => { document.body.removeChild(el); }, 2500);
 }
 
 function draw() {
@@ -329,6 +329,29 @@ function draw() {
 
     if (gameState === 1) {
         gameSpeed += 0.0002;
+        
+        // ★ 智慧 Combo 邏輯：檢查螢幕上是否有珍珠 ★
+        let hasPearlOnScreen = pearls.some(p => p.pos.x > 0 && p.pos.x < width);
+        
+        if (comboCount > 0) {
+            // 只有當螢幕上有珍珠時，才開始倒數 (公平機制)
+            if (hasPearlOnScreen) {
+                comboTimer--;
+            }
+            
+            let barWidth = map(comboTimer, 0, COMBO_TIME_LIMIT, 0, 200);
+            noStroke();
+            // 如果暫停計時，變白色提示
+            if (hasPearlOnScreen) fill(255, 255, 0, 150);
+            else fill(255, 255, 255, 100);
+            
+            rect(width/2 - 100, 80, barWidth, 10, 5);
+            
+            if (comboTimer <= 0) {
+                comboCount = 0; // 真的沒吃到，斷連
+                squid.setEvolution(0); // 退化回原型
+            }
+        }
         
         terrain.update();
         terrain.display();
@@ -346,15 +369,24 @@ function draw() {
                 comboTimer = COMBO_TIME_LIMIT;
                 score += 100 + (comboCount * 50);
                 
-                if (comboCount >= 10) {
+                // ★ 進化邏輯：Combo 幾就進化成幾號生物 ★
+                squid.setEvolution(comboCount);
+
+                // ★ 過關判定 (Combo 8) ★
+                if (comboCount >= WIN_COMBO) {
                     playJackpotSound();
-                    score += 1000;
-                    squid.hp++; // ★ 無限加血 ★
+                    score += 5000;
+                    squid.hp = max(squid.hp + 1, 5); // 補滿至少5滴血
                     updateHPDisplay();
-                    squid.activateGoldenMode();
+                    
                     showJackpotText();
-                    for(let k=0; k<30; k++) stars.push(new StarParticle(p.pos.x, p.pos.y));
+                    flashScreen = 255; // 閃光特效
+                    
+                    for(let k=0; k<50; k++) stars.push(new StarParticle(p.pos.x, p.pos.y));
+                    
+                    // 過關後 Combo 歸零，開始新輪迴
                     comboCount = 0;
+                    squid.setEvolution(0);
                 } else {
                     playCollectSound(comboCount - 1);
                     showComboText(screenPosition(p.pos.x), screenPosition(p.pos.y), comboCount);
@@ -386,25 +418,16 @@ function draw() {
             if (!squid.isInvincible) {
                 squid.takeDamage();
                 comboCount = 0;
+                squid.setEvolution(0); // 受傷退化
                 shakeAmount = 15;
                 playCollisionSound();
                 updateHPDisplay();
                 if (collision.type === 'top') squid.vel.y = 8;
                 else if (collision.type === 'bottom') squid.vel.y = -12;
-                if (squid.hp <= 0) gameOver();
+                
+                if (squid.hp <= 0) triggerDeath();
             }
         }
-        
-        // ★ UI 繪製修正：移到最後面，確保不被擋住 ★
-        if (comboCount > 0) {
-            comboTimer--;
-            let barWidth = map(comboTimer, 0, COMBO_TIME_LIMIT, 0, 200);
-            noStroke(); fill(255, 255, 0, 150);
-            // 畫在畫面頂端，確保明顯
-            rect(width/2 - 100, 80, barWidth, 10, 5);
-            if (comboTimer <= 0) comboCount = 0;
-        }
-
         document.getElementById('score-val').innerText = score;
 
     } else if (gameState === 2) {
@@ -412,15 +435,20 @@ function draw() {
         squid.updatePhysicsOnly();
         squid.display();
         
-        fill(255, 50, 50); textSize(60); textAlign(CENTER, CENTER);
-        text("任務失敗", width/2, height/2 - 20);
-        
-        if (canRestart) {
-            textSize(30); fill(255);
-            if (frameCount % 60 < 40) text("點擊畫面 重新冒險", width/2, height/2 + 60);
+        if (squid.pos.y > height + 100) {
+            fill(255, 50, 50); textSize(60); textAlign(CENTER, CENTER);
+            text("GAME OVER", width/2, height/2 - 20);
+            
+            if (canRestart) {
+                textSize(30); fill(255);
+                let alpha = map(sin(frameCount * 0.1), -1, 1, 100, 255);
+                fill(255, 255, 255, alpha);
+                text("點擊畫面 重新開始", width/2, height/2 + 60);
+            }
         }
     }
     
+    // 粒子系統更新
     if (random() > 0.8) particles.push(new Bubble(width, random(height), false));
     for (let i = particles.length - 1; i >= 0; i--) {
         particles[i].update();
@@ -433,17 +461,31 @@ function draw() {
         if (stars[i].finished()) stars.splice(i, 1);
     }
     
+    // 過關閃白光
+    if (flashScreen > 0) {
+        noStroke();
+        fill(255, flashScreen);
+        rect(0, 0, width, height);
+        flashScreen -= 5;
+    }
+    
     pop();
 }
 
 function screenPosition(x, y) { return x; }
 
-function gameOver() {
+function triggerDeath() {
     gameState = 2;
     stopFallingSequence();
-    if(isAudioReady) collisionSynth.triggerAttackRelease("C1", "1n");
+    playDieSound();
+    squid.explode();
+    for(let k=0; k<20; k++) {
+        let b = new Bubble(squid.pos.x, squid.pos.y, true);
+        b.vel = p5.Vector.random2D().mult(random(5, 10));
+        particles.push(b);
+    }
     canRestart = false;
-    setTimeout(() => { canRestart = true; }, 1000);
+    setTimeout(() => { canRestart = true; }, 1500);
 }
 
 function handleInput(e) {
@@ -478,16 +520,13 @@ function drawBackground() {
 }
 
 // ==========================================
-//  PART 3: 類別
+//  PART 3: 類別 (含進化繪圖)
 // ==========================================
 class CaveTerrain {
-    constructor() {
-        this.reset(true);
-    }
+    constructor() { this.reset(true); }
     reset(randomize = false) {
         if(randomize) this.noiseOffset = random(10000);
         else this.noiseOffset = 0;
-        
         this.segments = [];
         for(let x=0; x<=width; x+=10) this.segments.push(this.generateHeight(x));
     }
@@ -544,7 +583,10 @@ class Pearl {
 
 class TechSquid {
     constructor(x, y) {
-        this.reset(x, y); this.size = 60; this.baseColor = color(0, 255, 255);
+        this.reset(x, y);
+        this.size = 60;
+        this.baseColor = color(0, 255, 255);
+        this.evolutionLevel = 0; // 0=Squid, 1=Cuttlefish, 2=Octopus...
     }
     reset(x, y) {
         this.pos = createVector(x, y); this.vel = createVector(0, 0);
@@ -552,7 +594,12 @@ class TechSquid {
         this.bodyColor = this.baseColor; this.squish = 1.0;
         this.tentaclePhase = 0; this.eyeSize = 15;
         this.hp = 3; this.invincibleTimer = 0; this.isInvincible = false;
-        this.isGolden = false; this.goldenTimer = 0;
+        this.evolutionLevel = 0;
+    }
+    setEvolution(level) {
+        this.evolutionLevel = level;
+        // 進化特效：稍微變大一點
+        this.size = 60 + (level * 2);
     }
     takeDamage() {
         this.hp--; this.invincibleTimer = 90; this.isInvincible = true;
@@ -560,62 +607,151 @@ class TechSquid {
     }
     jump(power) {
         this.vel.y = -9; this.squish = 0.6;
-        if(!this.isGolden) this.bodyColor = color(255, 50, 255);
+        if(!this.isInvincible) this.updateColorByLevel();
         this.eyeSize = 25;
         for(let i=0; i<5; i++) particles.push(new Bubble(this.pos.x, this.pos.y + 30, true));
     }
-    activateGoldenMode() {
-        this.isGolden = true; this.goldenTimer = 300; this.bodyColor = color(255, 215, 0);
+    explode() {
+        this.vel.y = -15; this.vel.x = random(-2, 2); this.bodyColor = color(100, 100, 100);
     }
     updatePhysicsOnly() {
-        this.vel.y += this.gravity; this.vel.mult(this.drag);
-        this.pos.add(this.vel); this.tentaclePhase += 0.05; this.vel.x += 0.05;
+        this.vel.y += this.gravity;
+        this.pos.add(this.vel);
+        this.tentaclePhase += 0.05;
+        this.vel.x *= 0.99;
+        this.pos.x += this.vel.x;
+    }
+    updateColorByLevel() {
+        // 根據等級改變顏色
+        if (this.evolutionLevel >= 6) this.bodyColor = color(255, 215, 0); // Gold/God
+        else if (this.evolutionLevel >= 4) this.bodyColor = color(255, 100, 255); // Pink/Purple
+        else if (this.evolutionLevel >= 2) this.bodyColor = color(100, 255, 100); // Green
+        else this.bodyColor = this.baseColor; // Cyan
     }
     update() {
         this.vel.y += this.gravity; this.vel.mult(this.drag); this.pos.add(this.vel);
         this.squish = lerp(this.squish, 1.0 + sin(frameCount*0.1)*0.05, 0.1);
-        if (this.isGolden) {
-            this.goldenTimer--; if (this.goldenTimer <= 0) this.isGolden = false;
-        }
+        
         if (this.isInvincible) {
             this.invincibleTimer--;
             if (frameCount % 10 < 5) this.bodyColor = color(255, 100, 100, 150);
-            else this.bodyColor = this.isGolden ? color(255, 215, 0) : this.baseColor;
+            else this.updateColorByLevel();
             if (this.invincibleTimer <= 0) {
-                this.isInvincible = false; this.bodyColor = this.isGolden ? color(255, 215, 0) : this.baseColor;
+                this.isInvincible = false; this.updateColorByLevel();
             }
         } else {
-            if(this.isGolden) this.bodyColor = lerpColor(color(255, 215, 0), color(255, 255, 100), sin(frameCount*0.2)*0.5 + 0.5);
-            else this.bodyColor = lerpColor(this.bodyColor, this.baseColor, 0.05);
+            this.updateColorByLevel();
         }
         this.eyeSize = lerp(this.eyeSize, 15, 0.1); this.tentaclePhase += 0.1;
     }
+    
+    // ★ 繪圖核心：根據等級畫不同生物 ★
     display() {
         push(); translate(this.pos.x, this.pos.y);
-        if (this.hp <= 0) rotate(frameCount * 0.1); else rotate(this.vel.y * 0.02);
+        if (gameState === 2) rotate(frameCount * 0.2); else rotate(this.vel.y * 0.02);
         
+        scale(1, this.squish);
+        
+        // 根據 Combo 等級決定畫什麼
+        let level = this.evolutionLevel;
+        
+        if (level === 0 || level === 1) this.drawSquid();
+        else if (level === 2) this.drawCuttlefish();
+        else if (level === 3) this.drawOctopus();
+        else if (level === 4) this.drawJellyfish();
+        else if (level === 5) this.drawSeahorse();
+        else if (level >= 6) this.drawAnglerfish();
+        
+        pop();
+    }
+    
+    // --- 各種生物的繪圖函式 ---
+    
+    drawSquid() { // 原型
         noFill(); strokeWeight(4);
         for(let i=-2; i<=2; i++) {
             stroke(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 200);
             beginShape();
-            for(let j=0; j<10; j++) {
+            for(let j=0; j<8; j++) {
                 let wave = sin(this.tentaclePhase + i + j*0.5) * j*1.5; vertex(i*10 + wave, 30 + j*8);
             }
             endShape();
         }
-        scale(1, this.squish);
         noStroke(); fill(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 150);
-        arc(0, 0, this.size*2, this.size*1.8, PI, TWO_PI); rect(-this.size, 0, this.size*2, 10);
-        noFill(); stroke(this.bodyColor); strokeWeight(2);
-        arc(0, 0, this.size*1.8, this.size*1.6, PI, TWO_PI);
-        let eyeY = -10; fill(255); noStroke();
-        ellipse(-20, eyeY, this.eyeSize+5); ellipse(20, eyeY, this.eyeSize+5);
-        fill(0); ellipse(-20, eyeY + this.vel.y*0.2, 5); ellipse(20, eyeY + this.vel.y*0.2, 5);
-        if(this.isGolden) {
-            fill(0); noStroke(); rect(-35, -15, 30, 15, 2); rect(5, -15, 30, 15, 2); rect(-5, -10, 10, 3);
-            fill(255, 100); rect(-30, -12, 10, 5); rect(10, -12, 10, 5);
+        arc(0, 0, this.size*1.8, this.size*1.8, PI, TWO_PI); rect(-this.size*0.9, 0, this.size*1.8, 10);
+        this.drawEyes(-20, -10);
+    }
+    
+    drawCuttlefish() { // 透抽 (長菱形)
+        noFill(); strokeWeight(4);
+        for(let i=-1; i<=1; i++) {
+            stroke(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 200);
+            line(i*10, 40, i*15, 70); // 觸鬚較直
         }
-        pop();
+        noStroke(); fill(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 150);
+        beginShape(); // 菱形身體
+        vertex(0, -50); vertex(30, 0); vertex(0, 50); vertex(-30, 0);
+        endShape(CLOSE);
+        this.drawEyes(-15, -10);
+    }
+    
+    drawOctopus() { // 章魚 (圓頭多腳)
+        noFill(); strokeWeight(5);
+        for(let i=0; i<8; i++) {
+             stroke(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 200);
+             let angle = map(i, 0, 8, -PI/2, PI/2);
+             let tx = sin(angle + this.tentaclePhase) * 40;
+             let ty = 30 + cos(angle) * 30;
+             line(0, 10, tx, ty);
+        }
+        noStroke(); fill(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 150);
+        ellipse(0, -10, 60, 50); // 圓頭
+        this.drawEyes(-15, -15);
+    }
+    
+    drawJellyfish() { // 水母 (半透明)
+        noFill(); strokeWeight(2);
+        for(let i=-3; i<=3; i++) {
+            stroke(255, 100);
+            let wave = sin(this.tentaclePhase + i*0.5 + frameCount*0.1) * 10;
+            line(i*8, 10, i*10 + wave, 60);
+        }
+        noStroke(); fill(200, 200, 255, 100);
+        arc(0, 0, 60, 50, PI, TWO_PI);
+        this.drawEyes(-15, -10);
+    }
+    
+    drawSeahorse() { // 海馬 (S型)
+        noFill(); stroke(this.bodyColor); strokeWeight(15);
+        beginShape();
+        vertex(0, -30);
+        bezierVertex(20, -30, 20, 0, 0, 10); // 頭頸
+        bezierVertex(-20, 20, -20, 40, 10, 50); // 尾巴捲
+        endShape();
+        noStroke(); fill(255);
+        ellipse(5, -25, 10); // 眼睛
+        fill(0); ellipse(7, -25, 3);
+    }
+    
+    drawAnglerfish() { // 燈籠魚 (兇猛)
+        // 燈籠
+        stroke(255); strokeWeight(2); line(0, -30, 20, -50);
+        noStroke(); fill(255, 255, 0); ellipse(20, -50, 10);
+        // 身體
+        fill(this.bodyColor);
+        ellipse(0, 0, 70, 60);
+        // 牙齒
+        fill(255);
+        triangle(-20, 10, -15, 25, -10, 10);
+        triangle(10, 10, 15, 25, 20, 10);
+        this.drawEyes(-15, -10);
+    }
+
+    drawEyes(x, y) {
+        fill(255); noStroke();
+        ellipse(x, y, this.eyeSize+5); ellipse(-x, y, this.eyeSize+5);
+        fill(0);
+        ellipse(x, y + this.vel.y*0.2, 5); ellipse(-x, y + this.vel.y*0.2, 5);
     }
 }
 
