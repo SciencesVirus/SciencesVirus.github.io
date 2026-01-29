@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Sound Fix</title>
+  <title>Cyber Squid - Death Fix</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -24,13 +24,6 @@
       background: rgba(0, 255, 255, 0.1); border: 3px solid #0ff; border-radius: 50px;
       cursor: pointer; margin-top: 30px; letter-spacing: 2px;
       box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
-      transition: all 0.2s;
-    }
-
-    button:active {
-        background: #0ff;
-        color: #000;
-        transform: scale(0.95);
     }
     
     #hud {
@@ -85,9 +78,7 @@
         top: 30%;
     }
     
-    #status-msg {
-        margin-top: 15px; font-size: 14px; color: #888;
-    }
+    #status-msg { margin-top: 15px; font-size: 14px; color: #888; }
     
     @keyframes floatUp {
         0% { transform: translateY(0) scale(1); opacity: 1; }
@@ -109,88 +100,67 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">呆萌花園鰻 • 音效修復版</p>
+    <p style="color: #0aa; font-size: 20px;">完美運行版</p>
     <button id="start-btn">開始冒險</button>
     <p id="status-msg">請點擊按鈕以啟動音效</p>
   </div>
 
 <script>
 // ==========================================
-//  PART 1: 聲音系統 (暴力喚醒版)
+//  PART 1: 聲音系統
 // ==========================================
 let jumpSynth, fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, dieSynth;
 let isAudioReady = false;
+let audioInitStarted = false;
 let lastJumpPitch = 600;
 let fallTimeoutID = null;
 let isFallingSoundPlaying = false;
 
-const noteMap = [
-    "C5", "D5", "E5", "G5", "A5",
-    "C6", "D6", "E6", "G6", "A6",
-    "C7", "E7", "G7"
-];
+const noteMap = ["C5", "D5", "E5", "G5", "A5", "C6", "D6", "E6", "G6", "A6", "C7", "E7", "G7"];
 
-// 初始化音效 (綁定在按鈕點擊事件)
 async function initAudio() {
-    const btn = document.getElementById('start-btn');
-    const msg = document.getElementById('status-msg');
+    if (audioInitStarted) return;
+    audioInitStarted = true;
     
+    const btn = document.getElementById('start-btn');
     btn.innerText = "啟動中...";
     
     try {
-        // 1. 強制啟動 Tone.js context
         await Tone.start();
-        
-        // 2. 如果瀏覽器還在裝死，再次強制 resume
-        if (Tone.context.state !== 'running') {
-            await Tone.context.resume();
-        }
-        
-        // 3. 設定主音量 (確保沒有被靜音)
-        Tone.Destination.volume.value = 0; // 0 dB (標準音量)
+        if (Tone.context.state !== 'running') await Tone.context.resume();
+        Tone.Destination.volume.value = 0;
 
-        // --- 合成器定義 ---
-
-        // 1. 跳躍 (Sine)
         jumpSynth = new Tone.Synth({
             oscillator: { type: "sine" },
             envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 }
         }).toDestination();
         jumpSynth.volume.value = -2;
 
-        // 2. 掉落 (Sine)
         fallSynth = new Tone.Synth({
             oscillator: { type: "sine" },
             envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
         }).toDestination();
         fallSynth.volume.value = -5;
 
-        // 3. 收集 (最穩定：Triangle + 短Envelope)
-        // 使用 PolySynth 的正確參數傳遞方式
         collectSynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 64,
             oscillator: { type: "triangle" },
-            envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
+            envelope: { attack: 0.005, decay: 0.05, sustain: 0, release: 0.05 }
         }).toDestination();
-        // 增加發聲數限制
-        collectSynth.maxPolyphony = 20;
-        collectSynth.volume.value = -5;
+        collectSynth.volume.value = -4;
         
-        // 4. 升級
         levelUpSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "sawtooth" },
             envelope: { attack: 0.05, decay: 0.5, sustain: 0.3, release: 1.5 }
         }).toDestination();
         levelUpSynth.volume.value = -8;
 
-        // 5. Jackpot (溫柔不爆音)
         jackpotSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "triangle" },
-            // Attack 0.1s (快), Release 1.0s (乾淨)
             envelope: { attack: 0.1, decay: 0.5, sustain: 0.3, release: 1.0 }
         }).toDestination();
         jackpotSynth.volume.value = -12;
 
-        // 6. 碰撞
         collisionSynth = new Tone.FMSynth({
             harmonicity: 3.0, modulationIndex: 10, oscillator: { type: "sine" }, modulation: { type: "square" },
             envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 },
@@ -198,21 +168,16 @@ async function initAudio() {
         }).toDestination();
         collisionSynth.volume.value = -2;
         
-        // 7. 死亡
         dieSynth = new Tone.NoiseSynth({
             noise: { type: "brown" },
             envelope: { attack: 0.01, decay: 0.5, sustain: 0 }
         }).toDestination();
         dieSynth.volume.value = -2;
 
-        // 4. 播放測試音 (Beep!) 以確認系統運作
         const testBeep = new Tone.Synth().toDestination();
-        testBeep.triggerAttackRelease("C6", "16n");
+        testBeep.triggerAttackRelease("C6", "32n");
 
         isAudioReady = true;
-        console.log("Audio Engine Started. Context State:", Tone.context.state);
-        
-        // 開始遊戲
         document.getElementById('overlay').style.display = 'none';
         document.getElementById('hud').style.display = 'block';
         document.getElementById('hp-bar').style.display = 'block';
@@ -220,8 +185,7 @@ async function initAudio() {
 
     } catch (e) {
         console.error("Audio Init Error:", e);
-        msg.innerText = "音效啟動失敗，請重新整理網頁試試";
-        msg.style.color = "red";
+        document.getElementById('status-msg').innerText = "音效啟動失敗";
     }
 }
 
@@ -232,13 +196,10 @@ function playJumpSound(power) {
     lastJumpPitch = pitch;
     
     if (squid && squid.evolutionLevel >= 5) {
-        jumpSynth.oscillator.type = "square";
-        jumpSynth.volume.value = -12;
+        jumpSynth.oscillator.type = "square"; jumpSynth.volume.value = -12;
     } else {
-        jumpSynth.oscillator.type = "sine";
-        jumpSynth.volume.value = -2;
+        jumpSynth.oscillator.type = "sine"; jumpSynth.volume.value = -2;
     }
-    // 使用 catch 避免未預期的錯誤導致崩潰
     try { jumpSynth.triggerAttackRelease(pitch, "8n"); } catch(e){}
 }
 
@@ -247,7 +208,7 @@ function playCollectSound(comboIndex) {
     let index = (comboIndex % 10);
     let rootNote = noteMap[index];
     let harmNote = noteMap[(index + 2) % noteMap.length];
-    try { collectSynth.triggerAttackRelease([rootNote, harmNote], "16n", undefined, 1); } catch(e){}
+    try { collectSynth.triggerAttackRelease([rootNote, harmNote], "32n", undefined, 1.0); } catch(e){}
 }
 
 function playLevelUpSound() {
@@ -262,35 +223,20 @@ function playJackpotSound() {
 
 function playCollisionSound() {
     if (!isAudioReady) return;
-    try {
-        collisionSynth.triggerAttackRelease("C3", "8n");
-        collisionSynth.frequency.rampTo("C2", 0.1);
-    } catch(e){}
+    try { collisionSynth.triggerAttackRelease("C3", "8n"); collisionSynth.frequency.rampTo("C2", 0.1); } catch(e){}
 }
 
 function playDieSound() {
     if (!isAudioReady) return;
-    try {
-        dieSynth.triggerAttackRelease("4n");
-        collisionSynth.triggerAttackRelease("C2", "2n");
-        collisionSynth.frequency.rampTo("C1", 1);
-    } catch(e){}
+    try { dieSynth.triggerAttackRelease("4n"); collisionSynth.triggerAttackRelease("C2", "2n"); collisionSynth.frequency.rampTo("C1", 1); } catch(e){}
 }
 
 function startFallingSequence() {
     if (!isAudioReady || isFallingSoundPlaying) return;
     isFallingSoundPlaying = true;
-    let currentPitch = lastJumpPitch;
-    let currentGap = 0.15;
-    let currentVol = -5;
-    
-    if (squid && squid.evolutionLevel >= 5) {
-        fallSynth.oscillator.type = "square";
-        fallSynth.volume.value = -12;
-    } else {
-        fallSynth.oscillator.type = "sine";
-        fallSynth.volume.value = -5;
-    }
+    let currentPitch = lastJumpPitch; let currentGap = 0.15; let currentVol = -5;
+    if (squid && squid.evolutionLevel >= 5) { fallSynth.oscillator.type = "square"; fallSynth.volume.value = -12; }
+    else { fallSynth.oscillator.type = "sine"; fallSynth.volume.value = -5; }
 
     function playBeat() {
         if (!isFallingSoundPlaying) return;
@@ -309,32 +255,19 @@ function stopFallingSequence() {
 }
 
 // ==========================================
-//  PART 2: 遊戲邏輯
+//  PART 2: 遊戲邏輯 (死亡修正)
 // ==========================================
 let squid;
-let particles = [];
-let stars = [];
-let terrain;
-let pearls = [];
-let gameState = 0;
-let score = 0;
-let gameSpeed = 3;
-let shakeAmount = 0;
-let canRestart = false;
-
-let comboCount = 0;
-let comboTimer = 0;
-const COMBO_TIME_LIMIT = 300;
+let particles = []; let stars = []; let terrain; let pearls = [];
+let gameState = 0; let score = 0; let gameSpeed = 3; let shakeAmount = 0; let canRestart = false;
+let comboCount = 0; let comboTimer = 0; const COMBO_TIME_LIMIT = 300;
 
 function setup() {
     createCanvas(windowWidth, windowHeight);
     squid = new TechSquid(width * 0.25, height/2);
     terrain = new CaveTerrain();
-    
     let btn = document.getElementById('start-btn');
-    // 使用 onclick 直接綁定，確保是用戶觸發
     btn.onclick = initAudio;
-    
     noLoop();
 }
 
@@ -355,9 +288,7 @@ function startGame() {
     }
     
     terrain.reset(true);
-    pearls = [];
-    particles = [];
-    stars = [];
+    pearls = []; particles = []; stars = [];
     updateHPDisplay();
     loop();
 }
@@ -365,46 +296,33 @@ function startGame() {
 function updateHPDisplay() {
     let hp = squid.hp;
     let hpElement = document.getElementById('hp-bar');
-    let heartSymbol = "❤";
-    let color = "#ff5555";
-    
+    let heartSymbol = "❤"; let color = "#ff5555";
     if (hp > 20) { heartSymbol = "👑"; color = "#ffd700"; }
     else if (hp > 10) { heartSymbol = "💛"; color = "#ffff00"; }
     else if (hp > 5) { heartSymbol = "💙"; color = "#00ffff"; }
-
     if (hp > 15) { hpElement.innerText = heartSymbol + " x" + hp; }
-    else {
-        let str = ""; for(let i=0; i<hp; i++) str += heartSymbol; hpElement.innerText = str;
-    }
-    hpElement.style.color = color;
-    hpElement.style.textShadow = `0 0 5px ${color}`;
+    else { let str = ""; for(let i=0; i<hp; i++) str += heartSymbol; hpElement.innerText = str; }
+    hpElement.style.color = color; hpElement.style.textShadow = `0 0 5px ${color}`;
 }
 
 function showComboText(x, y, count) {
     let el = document.createElement('div');
-    el.className = 'combo-text';
-    el.style.left = x + 'px';
-    el.style.top = y + 'px';
+    el.className = 'combo-text'; el.style.left = x + 'px'; el.style.top = y + 'px';
     el.innerText = count > 1 ? "COMBO x" + count + "!" : "NICE!";
     if(count > 5) el.style.color = "#ff00ff";
-    document.body.appendChild(el);
-    setTimeout(() => { document.body.removeChild(el); }, 1000);
+    document.body.appendChild(el); setTimeout(() => { document.body.removeChild(el); }, 1000);
 }
 
 function showEvoText(text) {
     let el = document.createElement('div');
-    el.className = 'evo-text';
-    el.innerHTML = text;
-    document.body.appendChild(el);
-    setTimeout(() => { document.body.removeChild(el); }, 2000);
+    el.className = 'evo-text'; el.innerHTML = text;
+    document.body.appendChild(el); setTimeout(() => { document.body.removeChild(el); }, 2000);
 }
 
 function showJackpotText() {
     let el = document.createElement('div');
-    el.className = 'jackpot-text';
-    el.innerHTML = "JACKPOT!<br>SUPER SQUID MODE!";
-    document.body.appendChild(el);
-    setTimeout(() => { document.body.removeChild(el); }, 3000);
+    el.className = 'jackpot-text'; el.innerHTML = "JACKPOT!<br>SUPER SQUID MODE!";
+    document.body.appendChild(el); setTimeout(() => { document.body.removeChild(el); }, 3000);
 }
 
 function draw() {
@@ -418,18 +336,16 @@ function draw() {
     drawBackground();
 
     if (gameState === 1) {
+        // ★ 正常遊戲時更新速度 ★
         gameSpeed += 0.0002;
         
         let hasPearlOnScreen = pearls.some(p => p.pos.x > 0 && p.pos.x < width);
         if (comboCount > 0) {
             if (hasPearlOnScreen) comboTimer--;
-            if (comboTimer <= 0) {
-                comboCount = 0;
-                // 斷連不退化
-            }
+            if (comboTimer <= 0) comboCount = 0;
         }
         
-        terrain.update();
+        terrain.update(); // 地形移動
         terrain.display();
 
         if (frameCount % 80 === 0 && random() > 0.2) {
@@ -466,7 +382,6 @@ function draw() {
                     showComboText(screenPosition(p.pos.x), screenPosition(p.pos.y), comboCount);
                     for(let k=0; k<8; k++) particles.push(new Bubble(p.pos.x, p.pos.y, true));
                 }
-                
                 pearls.splice(i, 1);
             } else if (p.offscreen()) {
                 pearls.splice(i, 1);
@@ -476,9 +391,7 @@ function draw() {
         squid.update();
         squid.display();
         
-        if (squid.vel.y > 2.5 && !isFallingSoundPlaying) {
-            startFallingSequence();
-        }
+        if (squid.vel.y > 2.5 && !isFallingSoundPlaying) startFallingSequence();
 
         let collision = terrain.checkCollision(squid);
         let obstacleHit = terrain.checkObstacleCollision(squid);
@@ -491,8 +404,7 @@ function draw() {
                 squid.pos.y = collision.limit - squid.size/2 - 2;
                 if (squid.vel.y > 0) squid.vel.y *= -0.5;
             } else if (obstacleHit) {
-                squid.vel.x = -5;
-                squid.vel.y = random(-5, 5);
+                squid.vel.x = -5; squid.vel.y = random(-5, 5);
             }
 
             if (!squid.isInvincible) {
@@ -511,10 +423,13 @@ function draw() {
         document.getElementById('score-val').innerText = score;
 
     } else if (gameState === 2) {
+        // ★ 死亡時，地形不更新，只顯示 ★
         terrain.display();
+        
         squid.updatePhysicsOnly();
         squid.display();
         
+        // 判斷是否掉出螢幕
         if (squid.pos.y > height + 100) {
             fill(255, 50, 50); textSize(60); textAlign(CENTER, CENTER);
             text("GAME OVER", width/2, height/2 - 20);
@@ -555,15 +470,18 @@ function draw() {
 function screenPosition(x, y) { return x; }
 
 function triggerDeath() {
-    gameState = 2;
-    stopFallingSequence();
+    gameState = 2; // 切換狀態
+    stopFallingSequence(); // 停止掉落音效
     playDieSound();
     squid.explode();
+    
+    // 產生爆炸效果
     for(let k=0; k<20; k++) {
         let b = new Bubble(squid.pos.x, squid.pos.y, true);
         b.vel = p5.Vector.random2D().mult(random(5, 10));
         particles.push(b);
     }
+    
     canRestart = false;
     setTimeout(() => { canRestart = true; }, 1500);
 }
@@ -571,27 +489,19 @@ function triggerDeath() {
 function handleInput(e) {
     if(e && e.cancelable) e.preventDefault();
     
-    // 如果是遊戲中點擊，處理跳躍
     if (gameState === 1) {
         let power = random(0.6, 0.9);
         squid.jump(power);
         playJumpSound(power);
-    }
-    // 如果是死亡畫面且允許重開
-    else if (gameState === 2 && canRestart) {
-        squid.evolutionLevel = 0; // 重置進化
+    } else if (gameState === 2 && canRestart) {
+        squid.evolutionLevel = 0;
         startGame();
     }
     return false;
 }
 
-function mousePressed() {
-    // 只有在遊戲開始後才接管滑鼠，避免擋住 start 按鈕
-    if (gameState !== 0) return handleInput(null);
-}
-function touchStarted() {
-    if (gameState !== 0) return handleInput(null);
-}
+function mousePressed() { if (gameState !== 0) return handleInput(null); }
+function touchStarted() { if (gameState !== 0) return handleInput(null); }
 
 function windowResized() {
     resizeCanvas(windowWidth, windowHeight);
@@ -608,115 +518,71 @@ function drawBackground() {
 }
 
 // ==========================================
-//  PART 3: 類別 (呆萌花園鰻)
+//  PART 3: 類別 (完全一致)
 // ==========================================
 
 class CaveObstacle {
     constructor(x, y, type, side) {
-        this.pos = createVector(x, y);
-        this.type = type;
-        this.side = side;
-        this.size = 40;
-        this.angle = random(TWO_PI);
-        this.timer = random(100);
-        this.leftEyeSize = random(3, 5);
-        this.rightEyeSize = random(3, 5);
+        this.pos = createVector(x, y); this.type = type; this.side = side; this.size = 40;
+        this.angle = random(TWO_PI); this.timer = random(100);
+        this.leftEyeSize = random(3, 5); this.rightEyeSize = random(3, 5);
         this.pupilOffsetLeft = createVector(random(-1, 1), random(-1, 1));
         this.pupilOffsetRight = createVector(random(-1, 1), random(-1, 1));
     }
     update() {
-        this.pos.x -= gameSpeed;
-        this.timer += 0.05;
+        this.pos.x -= gameSpeed; this.timer += 0.05;
+        if(frameCount % 20 === 0) {
+             this.pupilOffsetLeft = createVector(random(-1, 1), random(-1, 1));
+             this.pupilOffsetRight = createVector(random(-1, 1), random(-1, 1));
+        }
     }
     display() {
-        push();
-        translate(this.pos.x, this.pos.y);
-        
+        push(); translate(this.pos.x, this.pos.y);
         if (this.type === 'starfish') {
-            rotate(this.angle + this.timer * 0.5);
-            noStroke(); fill(255, 100, 100);
+            rotate(this.angle + this.timer * 0.5); noStroke(); fill(255, 100, 100);
             beginShape();
             for (let i = 0; i < 5; i++) {
-                let a = TWO_PI * i / 5 - HALF_PI;
-                let r = this.size / 2;
-                vertex(cos(a) * r, sin(a) * r);
-                a += TWO_PI / 10;
-                vertex(cos(a) * r * 0.4, sin(a) * r * 0.4);
+                let a = TWO_PI * i / 5 - HALF_PI; let r = this.size / 2;
+                vertex(cos(a) * r, sin(a) * r); a += TWO_PI / 10; vertex(cos(a) * r * 0.4, sin(a) * r * 0.4);
             }
-            endShape(CLOSE);
-            fill(255, 200); ellipse(0, 0, 5, 5);
+            endShape(CLOSE); fill(255, 200); ellipse(0, 0, 5, 5);
         } else if (this.type === 'eel') {
-            // ★ 花園鰻：白色底 + 黑色斑點 ★
-            let sway = sin(this.timer) * 15;
-            let dir = (this.side === 'top') ? 1 : -1;
-            
-            noFill();
-            stroke(240);
-            strokeWeight(14);
-            beginShape();
-            vertex(0, 0);
-            bezierVertex(0, 20*dir, sway, 40*dir, sway*0.5, 70*dir);
-            endShape();
-            
-            // 斑點
-            noStroke(); fill(50);
-            ellipse(0, 15*dir, 5, 5);
-            ellipse(sway*0.3, 40*dir, 5, 5);
-
-            // 頭部
-            fill(240);
-            let headX = sway*0.5;
-            let headY = 70*dir;
-            ellipse(headX, headY, 20, 24);
-            
-            // 眼白
-            fill(255);
-            ellipse(headX - 5, headY - 2, this.leftEyeSize+2, this.leftEyeSize+2);
+            let sway = sin(this.timer) * 15; let dir = (this.side === 'top') ? 1 : -1;
+            noFill(); stroke(240); strokeWeight(14);
+            beginShape(); vertex(0, 0); bezierVertex(0, 20*dir, sway, 40*dir, sway*0.5, 70*dir); endShape();
+            noStroke(); fill(50); ellipse(0, 15*dir, 5, 5); ellipse(sway*0.3, 40*dir, 5, 5);
+            fill(240); let headX = sway*0.5; let headY = 70*dir; ellipse(headX, headY, 20, 24);
+            fill(255); ellipse(headX - 5, headY - 2, this.leftEyeSize+2, this.leftEyeSize+2);
             ellipse(headX + 5, headY + 2, this.rightEyeSize+2, this.rightEyeSize+2);
-            
-            // 眼珠 (鬥雞眼/亂看)
-            fill(0);
-            ellipse(headX - 5 + this.pupilOffsetLeft.x, headY - 2 + this.pupilOffsetLeft.y, 2, 2);
+            fill(0); ellipse(headX - 5 + this.pupilOffsetLeft.x, headY - 2 + this.pupilOffsetLeft.y, 2, 2);
             ellipse(headX + 5 + this.pupilOffsetRight.x, headY + 2 + this.pupilOffsetRight.y, 2, 2);
         }
         pop();
     }
     checkCollision(squid) {
-        let hitDist = this.size/2 + squid.size/2;
-        let offsetY = 0;
-        if (this.type === 'eel') {
-            let dir = (this.side === 'top') ? 1 : -1;
-            offsetY = 70 * dir;
-        }
-        let d = dist(this.pos.x, this.pos.y + offsetY, squid.pos.x, squid.pos.y);
-        return d < hitDist;
+        let hitDist = this.size/2 + squid.size/2; let offsetY = 0;
+        if (this.type === 'eel') { let dir = (this.side === 'top') ? 1 : -1; offsetY = 70 * dir; }
+        let d = dist(this.pos.x, this.pos.y + offsetY, squid.pos.x, squid.pos.y); return d < hitDist;
     }
 }
 
 class CaveTerrain {
     constructor() { this.reset(true); }
     reset(randomize = false) {
-        if(randomize) this.noiseOffset = random(10000);
-        else this.noiseOffset = 0;
-        this.segments = [];
-        this.obstacles = [];
+        if(randomize) this.noiseOffset = random(10000); else this.noiseOffset = 0;
+        this.segments = []; this.obstacles = [];
         for(let x=0; x<=width; x+=10) this.addSegment(x);
     }
     addSegment(x) {
-        let h = this.generateHeight(x);
-        this.segments.push(h);
+        let h = this.generateHeight(x); this.segments.push(h);
         if (random() < 0.05) {
-            let type = random() < 0.5 ? 'starfish' : 'eel';
-            let side = random() < 0.5 ? 'top' : 'bottom';
-            let y = (side === 'top') ? h.top : h.bottom;
-            let offset = (side === 'top') ? -10 : 10;
-            if (type === 'eel') offset = 0;
+            let type = random() < 0.5 ? 'starfish' : 'eel'; let side = random() < 0.5 ? 'top' : 'bottom';
+            let y = (side === 'top') ? h.top : h.bottom; let offset = (side === 'top') ? -10 : 10; if (type === 'eel') offset = 0;
             this.obstacles.push(new CaveObstacle(x, y + offset, type, side));
         }
     }
     generateHeight(x) {
-        let n = noise(this.noiseOffset);
-        this.noiseOffset += 0.02;
+        let n = noise(this.noiseOffset); this.noiseOffset += 0.02;
         let gapSize = map(n, 0, 1, 450, 650);
         let center = map(noise(this.noiseOffset * 0.5 + 100), 0, 1, 50, height-50);
         return { x: x, top: center - gapSize/2, bottom: center + gapSize/2 };
@@ -733,12 +599,8 @@ class CaveTerrain {
     }
     display() {
         fill(20, 30, 40); stroke(0, 255, 255, 50);
-        beginShape(); vertex(0, 0);
-        for (let s of this.segments) vertex(s.x, s.top);
-        vertex(width, 0); endShape(CLOSE);
-        beginShape(); vertex(0, height);
-        for (let s of this.segments) vertex(s.x, s.bottom);
-        vertex(width, height); endShape(CLOSE);
+        beginShape(); vertex(0, 0); for (let s of this.segments) vertex(s.x, s.top); vertex(width, 0); endShape(CLOSE);
+        beginShape(); vertex(0, height); for (let s of this.segments) vertex(s.x, s.bottom); vertex(width, height); endShape(CLOSE);
         for (let o of this.obstacles) o.display();
     }
     getCenterY(atX) { return map(noise(this.noiseOffset * 0.5 + 100), 0, 1, 50, height-50); }
@@ -746,8 +608,7 @@ class CaveTerrain {
         for (let s of this.segments) {
             if (abs(s.x - squid.pos.x) < 10) {
                 let safeZoneTop = s.top; let safeZoneBot = s.bottom;
-                let squidTop = squid.pos.y - squid.size/2 + 5;
-                let squidBot = squid.pos.y + squid.size/2 - 5;
+                let squidTop = squid.pos.y - squid.size/2 + 5; let squidBot = squid.pos.y + squid.size/2 - 5;
                 if (squidTop < safeZoneTop) return { hit: true, type: 'top', limit: safeZoneTop };
                 if (squidBot > safeZoneBot) return { hit: true, type: 'bottom', limit: safeZoneBot };
             }
@@ -755,61 +616,36 @@ class CaveTerrain {
         return { hit: false, type: 'none', limit: 0 };
     }
     checkObstacleCollision(squid) {
-        for (let o of this.obstacles) {
-            if (o.checkCollision(squid)) return true;
-        }
-        return false;
+        for (let o of this.obstacles) { if (o.checkCollision(squid)) return true; } return false;
     }
 }
 
 class Pearl {
     constructor(x, y) { this.pos = createVector(x, y); this.r = 20; }
     update() { this.pos.x -= gameSpeed; }
-    display() {
-        noStroke(); fill(255, 255, 200, 100); ellipse(this.pos.x, this.pos.y, this.r * 2.5);
-        fill(255); ellipse(this.pos.x, this.pos.y, this.r);
-    }
-    hits(squid) {
-        let d = dist(this.pos.x, this.pos.y, squid.pos.x, squid.pos.y);
-        return d < this.r + squid.size;
-    }
+    display() { noStroke(); fill(255, 255, 200, 100); ellipse(this.pos.x, this.pos.y, this.r * 2.5); fill(255); ellipse(this.pos.x, this.pos.y, this.r); }
+    hits(squid) { let d = dist(this.pos.x, this.pos.y, squid.pos.x, squid.pos.y); return d < this.r + squid.size; }
     offscreen() { return this.pos.x < -50; }
 }
 
 class TechSquid {
-    constructor(x, y) {
-        this.reset(x, y); this.size = 60; this.baseColor = color(0, 255, 255); this.evolutionLevel = 0;
-    }
+    constructor(x, y) { this.reset(x, y); this.size = 60; this.baseColor = color(0, 255, 255); this.evolutionLevel = 0; }
     reset(x, y) {
-        this.pos = createVector(x, y); this.vel = createVector(0, 0);
-        this.gravity = 0.35; this.drag = 0.95;
-        this.bodyColor = this.baseColor; this.squish = 1.0;
-        this.tentaclePhase = 0; this.eyeSize = 15;
-        this.hp = 3; this.invincibleTimer = 0; this.isInvincible = false;
-        this.evolutionLevel = 0;
+        this.pos = createVector(x, y); this.vel = createVector(0, 0); this.gravity = 0.35; this.drag = 0.95;
+        this.bodyColor = this.baseColor; this.squish = 1.0; this.tentaclePhase = 0; this.eyeSize = 15;
+        this.hp = 3; this.invincibleTimer = 0; this.isInvincible = false; this.evolutionLevel = 0;
     }
     setEvolution(level) {
-        if (level > this.evolutionLevel) {
-            this.evolutionLevel = level;
-            this.size = 60 + (min(level, 5) * 5);
-        }
+        if (level > this.evolutionLevel) { this.evolutionLevel = level; this.size = 60 + (min(level, 5) * 5); }
     }
-    takeDamage() {
-        this.hp--; this.invincibleTimer = 90; this.isInvincible = true;
-        this.bodyColor = color(255, 50, 50);
-    }
+    takeDamage() { this.hp--; this.invincibleTimer = 90; this.isInvincible = true; this.bodyColor = color(255, 50, 50); }
     jump(power) {
-        this.vel.y = -9; this.squish = 0.6;
-        if(!this.isInvincible) this.updateColorByLevel();
-        this.eyeSize = 25;
-        for(let i=0; i<5; i++) particles.push(new Bubble(this.pos.x, this.pos.y + 30, true));
+        this.vel.y = -9; this.squish = 0.6; if(!this.isInvincible) this.updateColorByLevel();
+        this.eyeSize = 25; for(let i=0; i<5; i++) particles.push(new Bubble(this.pos.x, this.pos.y + 30, true));
     }
-    explode() {
-        this.vel.y = -15; this.vel.x = random(-2, 2); this.bodyColor = color(100, 100, 100);
-    }
+    explode() { this.vel.y = -15; this.vel.x = random(-2, 2); this.bodyColor = color(100, 100, 100); }
     updatePhysicsOnly() {
-        this.vel.y += this.gravity; this.vel.mult(this.drag);
-        this.pos.add(this.vel); this.tentaclePhase += 0.05; this.vel.x *= 0.99; this.pos.x += this.vel.x;
+        this.vel.y += this.gravity; this.pos.add(this.vel); this.tentaclePhase += 0.05; this.vel.x *= 0.99; this.pos.x += this.vel.x;
     }
     updateColorByLevel() {
         if (this.evolutionLevel >= 5) this.bodyColor = color(255, 215, 0);
@@ -822,155 +658,66 @@ class TechSquid {
     update() {
         this.vel.y += this.gravity; this.vel.mult(this.drag); this.pos.add(this.vel);
         this.squish = lerp(this.squish, 1.0 + sin(frameCount*0.1)*0.05, 0.1);
-        
         if (this.isInvincible) {
             this.invincibleTimer--;
-            if (frameCount % 10 < 5) this.bodyColor = color(255, 100, 100, 150);
-            else this.updateColorByLevel();
-            if (this.invincibleTimer <= 0) {
-                this.isInvincible = false; this.updateColorByLevel();
-            }
+            if (frameCount % 10 < 5) this.bodyColor = color(255, 100, 100, 150); else this.updateColorByLevel();
+            if (this.invincibleTimer <= 0) { this.isInvincible = false; this.updateColorByLevel(); }
         } else {
             if(this.evolutionLevel >= 5) this.bodyColor = lerpColor(color(255, 215, 0), color(255, 255, 100), sin(frameCount*0.2)*0.5 + 0.5);
             else this.updateColorByLevel();
         }
         this.eyeSize = lerp(this.eyeSize, 15, 0.1); this.tentaclePhase += 0.1;
     }
-    
     display() {
         push(); translate(this.pos.x, this.pos.y);
         if (gameState === 2) rotate(frameCount * 0.2); else rotate(this.vel.y * 0.02);
         scale(1, this.squish);
-        
-        let level = this.evolutionLevel;
-        if (level > 5) level = 5;
-
+        let level = this.evolutionLevel; if (level > 5) level = 5;
         switch(level) {
-            case 0: this.drawSquid(); break;
-            case 1: this.drawCuttlefish(); break;
-            case 2: this.drawJellyfish(); break;
-            case 3: this.drawSeahorse(); break;
-            case 4: this.drawAnglerfish(); break;
-            case 5: this.drawGoldenSquid(); break;
+            case 0: this.drawSquid(); break; case 1: this.drawCuttlefish(); break; case 2: this.drawJellyfish(); break;
+            case 3: this.drawSeahorse(); break; case 4: this.drawAnglerfish(); break; case 5: this.drawGoldenSquid(); break;
             default: this.drawSquid();
         }
-        
+        if (level >= 5) { noFill(); stroke(255, 215, 0, 100); strokeWeight(2); let aura = 80 + sin(frameCount * 0.2) * 10; ellipse(0, 0, aura, aura); }
         pop();
     }
-    
     drawSquid() {
-        noFill(); strokeWeight(4);
-        for(let i=-2; i<=2; i++) {
-            stroke(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 200);
-            beginShape();
-            for(let j=0; j<8; j++) {
-                let wave = sin(this.tentaclePhase + i + j*0.5) * j*1.5; vertex(i*10 + wave, 30 + j*8);
-            }
-            endShape();
-        }
-        noStroke(); fill(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 150);
-        arc(0, 0, this.size*1.8, this.size*1.8, PI, TWO_PI); rect(-this.size*0.9, 0, this.size*1.8, 10);
-        this.drawEyes(-20, -10);
+        noFill(); strokeWeight(4); for(let i=-2; i<=2; i++) { stroke(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 200); beginShape(); for(let j=0; j<8; j++) { let wave = sin(this.tentaclePhase + i + j*0.5) * j*1.5; vertex(i*10 + wave, 30 + j*8); } endShape(); }
+        noStroke(); fill(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 150); arc(0, 0, this.size*1.8, this.size*1.8, PI, TWO_PI); rect(-this.size*0.9, 0, this.size*1.8, 10); this.drawEyes(-20, -10);
     }
-    
     drawCuttlefish() {
-        noFill(); strokeWeight(4);
-        for(let i=-1; i<=1; i++) {
-            stroke(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 200);
-            line(i*10, 40, i*15, 70);
-        }
-        noStroke(); fill(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 150);
-        beginShape();
-        vertex(0, -50); vertex(30, 0); vertex(0, 50); vertex(-30, 0);
-        endShape(CLOSE);
-        this.drawEyes(-15, -10);
+        noFill(); strokeWeight(4); for(let i=-1; i<=1; i++) { stroke(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 200); line(i*10, 40, i*15, 70); }
+        noStroke(); fill(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 150); beginShape(); vertex(0, -50); vertex(30, 0); vertex(0, 50); vertex(-30, 0); endShape(CLOSE); this.drawEyes(-15, -10);
     }
-    
     drawJellyfish() {
-        noFill(); strokeWeight(2);
-        for(let i=-3; i<=3; i++) {
-            stroke(255, 100);
-            let wave = sin(this.tentaclePhase + i*0.5 + frameCount*0.1) * 10;
-            line(i*8, 10, i*10 + wave, 60);
-        }
-        noStroke(); fill(200, 200, 255, 100);
-        arc(0, 0, 60, 50, PI, TWO_PI);
-        this.drawEyes(-15, -10);
+        noFill(); strokeWeight(2); for(let i=-3; i<=3; i++) { stroke(255, 100); let wave = sin(this.tentaclePhase + i*0.5 + frameCount*0.1) * 10; line(i*8, 10, i*10 + wave, 60); }
+        noStroke(); fill(200, 200, 255, 100); arc(0, 0, 60, 50, PI, TWO_PI); this.drawEyes(-15, -10);
     }
-    
     drawSeahorse() {
-        noFill(); stroke(this.bodyColor); strokeWeight(18);
-        beginShape();
-        vertex(0, -35);
-        bezierVertex(20, -35, 25, -10, 5, 10);
-        bezierVertex(-25, 25, -25, 50, 15, 60);
-        endShape();
-        strokeWeight(8); line(0, -30, -25, -25);
-        noStroke(); fill(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 150);
-        triangle(-10, 0, -25, 10, -10, 20);
-        this.drawEyes(5, -25);
+        noFill(); stroke(this.bodyColor); strokeWeight(18); beginShape(); vertex(0, -35); bezierVertex(20, -35, 25, -10, 5, 10); bezierVertex(-25, 25, -25, 50, 15, 60); endShape();
+        strokeWeight(8); line(0, -30, -25, -25); noStroke(); fill(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 150); triangle(-10, 0, -25, 10, -10, 20); this.drawEyes(5, -25);
     }
-    
     drawAnglerfish() {
-        stroke(255); strokeWeight(2);
-        noFill(); beginShape(); vertex(0, -25); bezierVertex(10, -40, 20, -40, 35, -20); endShape();
-        noStroke(); fill(255, 255, 0); ellipse(35, -20, 15);
-        fill(255, 255, 0, 100); ellipse(35, -20, 30);
-        fill(this.bodyColor); ellipse(0, 0, 80, 70);
-        fill(this.bodyColor); arc(0, 20, 70, 40, 0, PI);
-        fill(255);
-        triangle(-20, 25, -15, 45, -10, 25); triangle(10, 25, 15, 45, 20, 25);
-        triangle(0, 25, 5, 40, 10, 25);
-        this.drawEyes(-15, -10);
+        stroke(255); strokeWeight(2); noFill(); beginShape(); vertex(0, -25); bezierVertex(10, -40, 20, -40, 35, -20); endShape(); noStroke(); fill(255, 255, 0); ellipse(35, -20, 15); fill(255, 255, 0, 100); ellipse(35, -20, 30);
+        fill(this.bodyColor); ellipse(0, 0, 80, 70); fill(this.bodyColor); arc(0, 20, 70, 40, 0, PI); fill(255); triangle(-20, 25, -15, 45, -10, 25); triangle(10, 25, 15, 45, 20, 25); triangle(0, 25, 5, 40, 10, 25); this.drawEyes(-15, -10);
     }
-
     drawGoldenSquid() {
-        this.drawSquid();
-        fill(0); noStroke();
-        rect(-35, -15, 30, 15, 2); rect(5, -15, 30, 15, 2); rect(-5, -10, 10, 3);
-        fill(255, 100); rect(-30, -12, 10, 5); rect(10, -12, 10, 5);
-        fill(255, 215, 0); stroke(255); strokeWeight(2);
-        beginShape();
-        vertex(-20, -35); vertex(-10, -50); vertex(0, -35); vertex(10, -50); vertex(20, -35);
-        endShape(CLOSE);
+        this.drawSquid(); fill(0); noStroke(); rect(-35, -15, 30, 15, 2); rect(5, -15, 30, 15, 2); rect(-5, -10, 10, 3); fill(255, 100); rect(-30, -12, 10, 5); rect(10, -12, 10, 5); fill(255, 215, 0); stroke(255); strokeWeight(2); beginShape(); vertex(-20, -35); vertex(-10, -50); vertex(0, -35); vertex(10, -50); vertex(20, -35); endShape(CLOSE);
     }
-
-    drawEyes(x, y) {
-        fill(255); noStroke();
-        ellipse(x, y, this.eyeSize+5); ellipse(-x, y, this.eyeSize+5);
-        fill(0);
-        ellipse(x, y + this.vel.y*0.2, 5); ellipse(-x, y + this.vel.y*0.2, 5);
-    }
+    drawEyes(x, y) { fill(255); noStroke(); ellipse(x, y, this.eyeSize+5); ellipse(-x, y, this.eyeSize+5); fill(0); ellipse(x, y + this.vel.y*0.2, 5); ellipse(-x, y + this.vel.y*0.2, 5); }
 }
 
 class Bubble {
-    constructor(x, y, burst) {
-        this.pos = createVector(x, y); this.isBurst = burst;
-        if(burst) { this.vel = p5.Vector.random2D().mult(random(2, 5)); this.size = random(5, 10); this.alpha = 255; }
-        else { this.vel = createVector(-gameSpeed * random(0.5, 1.5), random(-1, 1)); this.size = random(2, 5); this.alpha = random(50, 150); }
-    }
+    constructor(x, y, burst) { this.pos = createVector(x, y); this.isBurst = burst; if(burst) { this.vel = p5.Vector.random2D().mult(random(2, 5)); this.size = random(5, 10); this.alpha = 255; } else { this.vel = createVector(-gameSpeed * random(0.5, 1.5), random(-1, 1)); this.size = random(2, 5); this.alpha = random(50, 150); } }
     update() { this.pos.add(this.vel); if(this.isBurst) { this.size *= 0.9; this.alpha -= 10; } }
     display() { if(this.alpha <= 0) return; noStroke(); fill(200, 255, 255, this.alpha); ellipse(this.pos.x, this.pos.y, this.size); }
     finished() { return this.alpha < 0 || this.pos.x < 0; }
 }
 
 class StarParticle {
-    constructor(x, y) {
-        this.pos = createVector(x, y); this.vel = p5.Vector.random2D().mult(random(5, 10));
-        this.acc = createVector(0, 0.2); this.size = random(10, 20);
-        this.alpha = 255; this.rotation = random(TWO_PI); this.rotSpeed = random(-0.2, 0.2);
-    }
+    constructor(x, y) { this.pos = createVector(x, y); this.vel = p5.Vector.random2D().mult(random(5, 10)); this.acc = createVector(0, 0.2); this.size = random(10, 20); this.alpha = 255; this.rotation = random(TWO_PI); this.rotSpeed = random(-0.2, 0.2); }
     update() { this.vel.add(this.acc); this.pos.add(this.vel); this.alpha -= 5; this.rotation += this.rotSpeed; }
-    display() {
-        if(this.alpha <= 0) return; push(); translate(this.pos.x, this.pos.y); rotate(this.rotation); noStroke();
-        fill(255, 215, 0, this.alpha); beginShape();
-        for (let i = 0; i < 5; i++) {
-            let angle = TWO_PI * i / 5 - HALF_PI; let x = cos(angle) * this.size; let y = sin(angle) * this.size;
-            vertex(x, y); angle += TWO_PI / 10;
-            let x2 = cos(angle) * (this.size * 0.4); let y2 = sin(angle) * (this.size * 0.4); vertex(x2, y2);
-        }
-        endShape(CLOSE); pop();
-    }
+    display() { if(this.alpha <= 0) return; push(); translate(this.pos.x, this.pos.y); rotate(this.rotation); noStroke(); fill(255, 215, 0, this.alpha); beginShape(); for (let i = 0; i < 5; i++) { let angle = TWO_PI * i / 5 - HALF_PI; let x = cos(angle) * this.size; let y = sin(angle) * this.size; vertex(x, y); angle += TWO_PI / 10; let x2 = cos(angle) * (this.size * 0.4); let y2 = sin(angle) * (this.size * 0.4); vertex(x2, y2); } endShape(CLOSE); pop(); }
     finished() { return this.alpha < 0; }
 }
 </script>
