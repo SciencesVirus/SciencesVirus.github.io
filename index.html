@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Garden Eel Edition</title>
+  <title>Cyber Squid - Derpy Eel</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -64,6 +64,20 @@
         top: 35%;
     }
     
+    .evo-text {
+        position: absolute;
+        color: #00ffff;
+        font-weight: bold;
+        font-size: 40px;
+        pointer-events: none;
+        animation: zoomOut 2s forwards;
+        text-shadow: 0 0 20px #ffffff;
+        z-index: 20;
+        width: 100%;
+        text-align: center;
+        top: 30%;
+    }
+    
     @keyframes floatUp {
         0% { transform: translateY(0) scale(1); opacity: 1; }
         50% { transform: translateY(-30px) scale(1.5); opacity: 1; }
@@ -84,15 +98,15 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">花園鰻與可愛夥伴</p>
+    <p style="color: #0aa; font-size: 20px;">呆萌花園鰻版</p>
     <button id="start-btn">開始冒險</button>
   </div>
 
 <script>
 // ==========================================
-//  PART 1: 聲音系統 (穩定Combo & 溫柔Jackpot)
+//  PART 1: 聲音系統 (爆音修正 & 穩定化)
 // ==========================================
-let jumpSynth, fallSynth, collectSynth, collisionSynth, jackpotSynth, dieSynth;
+let jumpSynth, fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, dieSynth;
 let isAudioReady = false;
 let lastJumpPitch = 600;
 let fallTimeoutID = null;
@@ -119,22 +133,29 @@ async function initAudio() {
     }).toDestination();
     fallSynth.volume.value = -5;
 
-    // ★ 修正：Combo音效穩定化 ★
+    // ★ 修正：收集音效極短促化，解決忽大忽小 ★
     collectSynth = new Tone.PolySynth(Tone.Synth, {
         maxPolyphony: 32,
         oscillator: { type: "triangle" },
-        // 將 release 縮短到 0.1，聲音變得「顆粒分明」，不會因為疊加而忽大忽小
-        envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.1 }
+        // Sustain 0, Release 極短，確保每個音都是 "Ping" 一聲就結束
+        envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
     }).toDestination();
     collectSynth.volume.value = -4;
     
-    // ★ 修正：Jackpot音效溫柔化 ★
+    // 升級音效
+    levelUpSynth = new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: "sawtooth" },
+        envelope: { attack: 0.05, decay: 0.5, sustain: 0.3, release: 1.5 }
+    }).toDestination();
+    levelUpSynth.volume.value = -8;
+
+    // ★ 修正：Jackpot 音量大幅降低，Attack 拉長 ★
     jackpotSynth = new Tone.PolySynth(Tone.Synth, {
         oscillator: { type: "triangle" },
-        // 將 attack 拉長到 2.0，聲音會慢慢浮現，完全不嚇人
-        envelope: { attack: 2.0, decay: 1.0, sustain: 0.5, release: 3.0 }
+        // Attack 2.0s 讓聲音緩慢升起，不爆音
+        envelope: { attack: 2.0, decay: 1.0, sustain: 0.5, release: 4.0 }
     }).toDestination();
-    jackpotSynth.volume.value = -5;
+    jackpotSynth.volume.value = -15; // 降到 -15dB 避免 Clip
 
     collisionSynth = new Tone.FMSynth({
         harmonicity: 3.0, modulationIndex: 10, oscillator: { type: "sine" }, modulation: { type: "square" },
@@ -162,7 +183,7 @@ function playJumpSound(power) {
     let pitch = map(power, 0.0, 1.0, 300, 700);
     lastJumpPitch = pitch;
     
-    if (squid && squid.evolutionLevel >= 5) { // 黃金型態
+    if (squid && squid.evolutionLevel >= 5) {
         jumpSynth.oscillator.type = "square";
         jumpSynth.volume.value = -8;
     } else {
@@ -177,13 +198,19 @@ function playCollectSound(comboIndex) {
     let index = (comboIndex % 10);
     let rootNote = noteMap[index];
     let harmNote = noteMap[(index + 2) % noteMap.length];
-    collectSynth.triggerAttackRelease([rootNote, harmNote], "16n");
+    // velocity 固定為 1，確保音量一致
+    collectSynth.triggerAttackRelease([rootNote, harmNote], "16n", undefined, 1);
+}
+
+function playLevelUpSound() {
+    if (!isAudioReady) return;
+    levelUpSynth.triggerAttackRelease(["C5", "E5", "G5", "C6"], "8n");
 }
 
 function playJackpotSound() {
     if (!isAudioReady) return;
-    // C Major 9 和弦
-    jackpotSynth.triggerAttackRelease(["C4", "E4", "G4", "B4", "D5"], "1n");
+    // 減少同時播放的音符數量，避免爆音
+    jackpotSynth.triggerAttackRelease(["C4", "G4", "C5", "E5"], "1n");
 }
 
 function playCollisionSound() {
@@ -231,7 +258,7 @@ function stopFallingSequence() {
 }
 
 // ==========================================
-//  PART 2: 遊戲邏輯
+//  PART 2: 遊戲邏輯 (進化保留)
 // ==========================================
 let squid;
 let particles = [];
@@ -266,7 +293,7 @@ function startGame() {
     gameSpeed = 3.5;
     comboCount = 0;
     comboTimer = 0;
-    squid.reset(width * 0.25, height/2);
+    squid.reset(width * 0.25, height/2); // 這裡會重置進化等級
     terrain.reset(true);
     
     pearls = [];
@@ -305,6 +332,14 @@ function showComboText(x, y, count) {
     setTimeout(() => { document.body.removeChild(el); }, 1000);
 }
 
+function showEvoText(text) {
+    let el = document.createElement('div');
+    el.className = 'evo-text';
+    el.innerHTML = text;
+    document.body.appendChild(el);
+    setTimeout(() => { document.body.removeChild(el); }, 2000);
+}
+
 function showJackpotText() {
     let el = document.createElement('div');
     el.className = 'jackpot-text';
@@ -326,11 +361,15 @@ function draw() {
     if (gameState === 1) {
         gameSpeed += 0.0002;
         
-        // 智慧 Combo
         let hasPearlOnScreen = pearls.some(p => p.pos.x > 0 && p.pos.x < width);
         if (comboCount > 0) {
             if (hasPearlOnScreen) comboTimer--;
-            if (comboTimer <= 0) { comboCount = 0; squid.setEvolution(0); }
+            
+            // ★ UI修正：不在此繪製，移到最後 ★
+            if (comboTimer <= 0) {
+                comboCount = 0;
+                // ★ 修正：斷連不退化！ (移除 squid.setEvolution(0)) ★
+            }
         }
         
         terrain.update();
@@ -349,16 +388,20 @@ function draw() {
                 comboTimer = COMBO_TIME_LIMIT;
                 score += 100 + (comboCount * 50);
                 
+                // 進化判定
                 let newLevel = floor(comboCount / 10);
                 if (newLevel > squid.evolutionLevel && newLevel <= 5) {
                     squid.setEvolution(newLevel);
-                    // playLevelUpSound(); // 可以加，但這裡沒實作，用 jackpot 代替
+                    playLevelUpSound();
+                    
+                    let names = ["", "透抽進化!", "水母進化!", "海馬進化!", "燈籠魚進化!", "黃金霸主!"];
+                    showEvoText(names[newLevel]);
+                    
                     squid.hp++;
                     updateHPDisplay();
                     for(let k=0; k<20; k++) stars.push(new StarParticle(p.pos.x, p.pos.y));
                 }
                 
-                // 10連擊特效
                 if (comboCount % 10 === 0 && comboCount > 0) {
                     playJackpotSound();
                     score += 1000;
@@ -401,7 +444,7 @@ function draw() {
             if (!squid.isInvincible) {
                 squid.takeDamage();
                 comboCount = 0;
-                squid.setEvolution(0);
+                // ★ 修正：受傷不退化！ (移除 squid.setEvolution(0)) ★
                 shakeAmount = 15;
                 playCollisionSound();
                 updateHPDisplay();
@@ -444,13 +487,13 @@ function draw() {
         if (stars[i].finished()) stars.splice(i, 1);
     }
     
-    // ★ 修正：Combo UI 移到最後繪製，確保置頂 ★
+    // ★ UI 修正：確保 Combo 條繪製在所有物體(包含山壁)的最上層 ★
     if (gameState === 1 && comboCount > 0) {
         let barWidth = map(comboTimer, 0, COMBO_TIME_LIMIT, 0, 200);
         let hasPearlOnScreen = pearls.some(p => p.pos.x > 0 && p.pos.x < width);
         noStroke();
-        if (hasPearlOnScreen) fill(255, 255, 0, 150);
-        else fill(255, 255, 255, 100); // 暫停時變白
+        if (hasPearlOnScreen) fill(255, 255, 0, 200);
+        else fill(255, 255, 255, 100);
         rect(width/2 - 100, 80, barWidth, 10, 5);
     }
 
@@ -508,7 +551,7 @@ function drawBackground() {
 //  PART 3: 類別 (造型優化)
 // ==========================================
 
-// ★ 花園鰻 (Garden Eel) ★
+// ★ 花園鰻 (Garden Eel) - 呆萌造型 ★
 class CaveObstacle {
     constructor(x, y, type, side) {
         this.pos = createVector(x, y);
@@ -517,10 +560,13 @@ class CaveObstacle {
         this.size = 40;
         this.angle = random(TWO_PI);
         this.timer = random(100);
+        // 隨機眼睛大小，製造呆萌感
+        this.leftEyeSize = random(3, 5);
+        this.rightEyeSize = random(3, 5);
     }
     update() {
         this.pos.x -= gameSpeed;
-        this.timer += 0.05; // 搖擺速度
+        this.timer += 0.05;
     }
     display() {
         push();
@@ -541,35 +587,32 @@ class CaveObstacle {
             fill(255, 200); ellipse(0, 0, 5, 5);
         } else if (this.type === 'eel') {
             // ★ 花園鰻：白色底 + 黑色斑點 ★
-            let sway = sin(this.timer) * 15; // 搖擺幅度
+            let sway = sin(this.timer) * 15;
             let dir = (this.side === 'top') ? 1 : -1;
             
-            // 身體
             noFill();
             stroke(240); // 白色
-            strokeWeight(12);
+            strokeWeight(14); // 稍微加粗
             beginShape();
             vertex(0, 0);
-            // S型曲線
             bezierVertex(0, 20*dir, sway, 40*dir, sway*0.5, 70*dir);
             endShape();
             
-            // 斑點 (裝飾用)
+            // 斑點
             noStroke(); fill(50);
-            ellipse(0, 10*dir, 4, 4);
-            ellipse(sway*0.3, 30*dir, 4, 4);
-            ellipse(sway*0.4, 50*dir, 4, 4);
+            ellipse(0, 15*dir, 5, 5);
+            ellipse(sway*0.3, 40*dir, 5, 5);
 
             // 頭部
             fill(240);
             let headX = sway*0.5;
             let headY = 70*dir;
-            ellipse(headX, headY, 18, 22);
+            ellipse(headX, headY, 20, 24);
             
-            // 呆萌眼睛
+            // 呆萌眼睛 (大小眼 + 鬥雞眼)
             fill(0);
-            ellipse(headX - 4, headY, 3, 3);
-            ellipse(headX + 4, headY, 3, 3);
+            ellipse(headX - 5, headY - 2, this.leftEyeSize, this.leftEyeSize);
+            ellipse(headX + 5, headY + 2, this.rightEyeSize, this.rightEyeSize);
         }
         pop();
     }
@@ -578,7 +621,7 @@ class CaveObstacle {
         let offsetY = 0;
         if (this.type === 'eel') {
             let dir = (this.side === 'top') ? 1 : -1;
-            offsetY = 70 * dir; // 判定點在頭部
+            offsetY = 70 * dir;
         }
         let d = dist(this.pos.x, this.pos.y + offsetY, squid.pos.x, squid.pos.y);
         return d < hitDist;
@@ -681,8 +724,11 @@ class TechSquid {
         this.evolutionLevel = 0;
     }
     setEvolution(level) {
-        this.evolutionLevel = level;
-        this.size = 60 + (min(level, 5) * 5);
+        // ★ 邏輯修正：只有等級變高時才更新 (單向進化) ★
+        if (level > this.evolutionLevel) {
+            this.evolutionLevel = level;
+            this.size = 60 + (min(level, 5) * 5);
+        }
     }
     takeDamage() {
         this.hp--; this.invincibleTimer = 90; this.isInvincible = true;
@@ -738,8 +784,8 @@ class TechSquid {
         if (level === 0) this.drawSquid();
         else if (level === 1) this.drawCuttlefish();
         else if (level === 2) this.drawJellyfish();
-        else if (level === 3) this.drawSeahorse(); // 新海馬
-        else if (level === 4) this.drawAnglerfish(); // 新燈籠魚
+        else if (level === 3) this.drawSeahorse();
+        else if (level === 4) this.drawAnglerfish();
         else if (level === 5) this.drawGoldenSquid();
         
         pop();
@@ -785,49 +831,30 @@ class TechSquid {
         this.drawEyes(-15, -10);
     }
     
-    drawSeahorse() { // ★ 新海馬 ★
+    drawSeahorse() {
         noFill(); stroke(this.bodyColor); strokeWeight(18);
         beginShape();
-        vertex(0, -35); // 頂端
-        bezierVertex(20, -35, 25, -10, 5, 10); // 頭頸
-        bezierVertex(-25, 25, -25, 50, 15, 60); // 捲尾
+        vertex(0, -35);
+        bezierVertex(20, -35, 25, -10, 5, 10);
+        bezierVertex(-25, 25, -25, 50, 15, 60);
         endShape();
-        
-        // 吻部
-        strokeWeight(8); line(0, -30, -20, -25);
-        
-        // 背鰭
+        strokeWeight(8); line(0, -30, -25, -25); // 長吻
         noStroke(); fill(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 150);
         triangle(-10, 0, -25, 10, -10, 20);
-
-        noStroke(); fill(255); ellipse(5, -25, 12); fill(0); ellipse(7, -25, 4);
+        this.drawEyes(5, -25);
     }
     
-    drawAnglerfish() { // ★ 新燈籠魚 ★
-        // 釣竿
+    drawAnglerfish() {
         stroke(255); strokeWeight(2);
-        noFill();
-        beginShape(); vertex(0, -25); bezierVertex(10, -40, 20, -40, 30, -20); endShape();
-        // 燈籠
-        noStroke(); fill(255, 255, 0); ellipse(30, -20, 15);
-        fill(255, 255, 0, 100); ellipse(30, -20, 30);
-
-        // 胖身體
+        noFill(); beginShape(); vertex(0, -25); bezierVertex(10, -40, 20, -40, 35, -20); endShape();
+        noStroke(); fill(255, 255, 0); ellipse(35, -20, 15);
+        fill(255, 255, 0, 100); ellipse(35, -20, 30);
         fill(this.bodyColor); ellipse(0, 0, 80, 70);
-        
-        // 巨大下巴 (厚道)
-        fill(this.bodyColor);
-        arc(0, 20, 70, 40, 0, PI);
-
-        // 尖牙
+        fill(this.bodyColor); arc(0, 20, 70, 40, 0, PI);
         fill(255);
-        triangle(-20, 25, -15, 45, -10, 25);
-        triangle(10, 25, 15, 45, 20, 25);
+        triangle(-20, 25, -15, 45, -10, 25); triangle(10, 25, 15, 45, 20, 25);
         triangle(0, 25, 5, 40, 10, 25);
-        
-        // 眼睛
-        fill(255); ellipse(-15, -10, 18, 18);
-        fill(0); ellipse(-15, -10, 5, 5);
+        this.drawEyes(-15, -10);
     }
 
     drawGoldenSquid() {
