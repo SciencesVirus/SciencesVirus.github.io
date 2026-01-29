@@ -134,7 +134,7 @@ async function initAudio() {
         oscillator: { type: "triangle" },
         envelope: { attack: 0.1, decay: 0.5, sustain: 0.5, release: 2.0 }
     }).toDestination();
-    jackpotSynth.volume.value = -6;
+    jackpotSynth.volume.value = -10;
 
     // 5. 碰撞
     collisionSynth = new Tone.FMSynth({
