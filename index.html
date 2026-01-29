@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - HP & Bounciness</title>
+  <title>Cyber Squid - Solid Physics</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -32,7 +32,6 @@
       display: none; font-weight: bold;
     }
     
-    /* 生命值顯示 */
     #hp-bar {
         position: absolute; top: 20px; right: 20px;
         font-size: 30px; color: #ff5555; text-shadow: 0 0 5px #f00;
@@ -47,13 +46,13 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">生命制 • 彈性碰撞版</p>
-    <button id="start-btn">開始遊戲</button>
+    <p style="color: #0aa; font-size: 20px;">物理防撞修正版</p>
+    <button id="start-btn">開始冒險</button>
   </div>
 
 <script>
 // ==========================================
-//  PART 1: 聲音系統 (新增可愛碰撞聲)
+//  PART 1: 聲音系統 (維持溫柔的碰撞聲)
 // ==========================================
 let jumpSynth, fallSynth, collectSynth, collisionSynth;
 let isAudioReady = false;
@@ -64,32 +63,28 @@ let isFallingSoundPlaying = false;
 async function initAudio() {
     await Tone.start();
     
-    // 1. 跳躍 (Sine)
     jumpSynth = new Tone.Synth({
         oscillator: { type: "sine" },
         envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 }
     }).toDestination();
     jumpSynth.volume.value = -2;
 
-    // 2. 掉落 (Sine)
     fallSynth = new Tone.Synth({
         oscillator: { type: "sine" },
         envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
     }).toDestination();
     fallSynth.volume.value = -5;
 
-    // 3. 收集 (Triangle Poly)
     collectSynth = new Tone.PolySynth(Tone.Synth, {
         oscillator: { type: "triangle" },
         envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
     }).toDestination();
     collectSynth.volume.value = -8;
 
-    // 4. ★ 新增：碰撞反彈聲 (FM Modulation) ★
-    // 使用 FM Synth 創造帶有金屬感/彈性的 "Boing" 聲
+    // FM Synth for cute "Boing" sound
     collisionSynth = new Tone.FMSynth({
-        harmonicity: 3.0, // 諧波比率，製造非整數倍泛音 (Ring Mod 聽感)
-        modulationIndex: 10, // 調變深度，讓聲音變厚
+        harmonicity: 3.0,
+        modulationIndex: 10,
         oscillator: { type: "sine" },
         modulation: { type: "square" },
         envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 },
@@ -117,12 +112,10 @@ function playCollectSound() {
     collectSynth.triggerAttackRelease(["C6", "E6"], "16n");
 }
 
-// ★ 播放可愛的碰撞聲 ★
 function playCollisionSound() {
     if (!isAudioReady) return;
-    // 快速滑音，製造 "Boing" 的感覺
     collisionSynth.triggerAttackRelease("C3", "8n");
-    collisionSynth.frequency.rampTo("C2", 0.1); // 音高快速下降
+    collisionSynth.frequency.rampTo("C2", 0.1);
 }
 
 function startFallingSequence() {
@@ -154,25 +147,28 @@ function stopFallingSequence() {
 }
 
 // ==========================================
-//  PART 2: 遊戲邏輯 (HP 與 反彈機制)
+//  PART 2: 遊戲邏輯 (修正碰撞與重啟)
 // ==========================================
 let squid;
 let particles = [];
 let terrain;
 let pearls = [];
-let gameState = 0;
+let gameState = 0; // 0:Init, 1:Play, 2:GameOver
 let score = 0;
 let gameSpeed = 3;
-
-// 畫面震動效果
 let shakeAmount = 0;
+let canRestart = false; // ★ 防止誤觸重啟
 
 function setup() {
     createCanvas(windowWidth, windowHeight);
     squid = new TechSquid(width * 0.25, height/2);
     terrain = new CaveTerrain();
     
-    document.getElementById('start-btn').addEventListener('click', initAudio);
+    // 同時支援 Touch 和 Click
+    let btn = document.getElementById('start-btn');
+    btn.addEventListener('touchstart', (e) => { e.preventDefault(); initAudio(); });
+    btn.addEventListener('click', initAudio);
+    
     noLoop();
 }
 
@@ -189,28 +185,33 @@ function startGame() {
 
 function updateHPDisplay() {
     let hearts = "";
-    for(let i=0; i<squid.hp; i++) hearts += "❤";
+    if (squid.hp > 0) {
+        for(let i=0; i<squid.hp; i++) hearts += "❤";
+    } else {
+        hearts = "☠";
+    }
     document.getElementById('hp-bar').innerText = hearts;
 }
 
 function draw() {
-    // 畫面震動處理
+    // 震動效果
     push();
     if (shakeAmount > 0) {
         translate(random(-shakeAmount, shakeAmount), random(-shakeAmount, shakeAmount));
-        shakeAmount *= 0.9; // 震動衰減
+        shakeAmount *= 0.9;
         if(shakeAmount < 0.5) shakeAmount = 0;
     }
     
     drawBackground();
 
     if (gameState === 1) {
+        // --- 遊戲進行中 ---
         gameSpeed += 0.0002;
         
         terrain.update();
         terrain.display();
 
-        // 寶物生成
+        // 寶物
         if (frameCount % 80 === 0 && random() > 0.2) {
             pearls.push(new Pearl(width, terrain.getCenterY(width)));
         }
@@ -218,7 +219,6 @@ function draw() {
             let p = pearls[i];
             p.update();
             p.display();
-            
             if (p.hits(squid)) {
                 score += 100;
                 playCollectSound();
@@ -229,32 +229,38 @@ function draw() {
             }
         }
 
-        // 章魚更新
         squid.update();
         squid.display();
         
+        // 掉落聲
         if (squid.vel.y > 2.5 && !isFallingSoundPlaying) {
             startFallingSequence();
         }
 
-        // ★ 物理碰撞偵測 ★
+        // ★ 物理碰撞核心邏輯 ★
         let collision = terrain.checkCollision(squid);
+        
         if (collision.hit) {
+            // 1. 強制把烏賊推回安全區域 (Clamp Position)
+            // 這樣就不會跑出山壁了
+            if (collision.type === 'top') {
+                squid.pos.y = collision.limit + squid.size/2 + 2; // 推回天花板下方
+                if (squid.vel.y < 0) squid.vel.y *= -0.5; // 速度反彈 (變慢)
+            } else if (collision.type === 'bottom') {
+                squid.pos.y = collision.limit - squid.size/2 - 2; // 推回地板上方
+                if (squid.vel.y > 0) squid.vel.y *= -0.5; // 速度反彈
+            }
+
+            // 2. 扣血邏輯
             if (!squid.isInvincible) {
-                // 真的撞到了，扣血
                 squid.takeDamage();
-                shakeAmount = 10; // 畫面震動
-                playCollisionSound(); // 播放可愛聲音
+                shakeAmount = 15;
+                playCollisionSound();
                 updateHPDisplay();
                 
-                // ★ 物理反彈機制：往反方向彈飛 ★
-                if (collision.type === 'top') {
-                    // 撞到天花板，用力往下推
-                    squid.vel.y = 8;
-                } else if (collision.type === 'bottom') {
-                    // 撞到地板，用力往上推 (稍微大一點，因為有重力)
-                    squid.vel.y = -12;
-                }
+                // 受傷時給一個較大的推力，提醒玩家
+                if (collision.type === 'top') squid.vel.y = 8;
+                else if (collision.type === 'bottom') squid.vel.y = -12;
                 
                 if (squid.hp <= 0) {
                     gameOver();
@@ -265,15 +271,28 @@ function draw() {
         document.getElementById('score-val').innerText = score;
 
     } else if (gameState === 2) {
+        // --- Game Over 狀態 ---
+        
+        // 繼續畫地形 (但不更新移動)
         terrain.display();
+        
+        // 繼續畫烏賊 (並讓它掉下去)
+        squid.updatePhysicsOnly();
         squid.display();
+        
+        // UI
         fill(255, 50, 50); textSize(60); textAlign(CENTER, CENTER);
-        text("任務失敗", width/2, height/2);
-        textSize(30); fill(255);
-        text("點擊畫面 再試一次", width/2, height/2 + 80);
+        text("任務失敗", width/2, height/2 - 20);
+        
+        if (canRestart) {
+            // 只有冷卻時間過後才顯示重來按鈕
+            textSize(30); fill(255);
+            // 閃爍文字
+            if (frameCount % 60 < 40) text("點擊畫面 重來", width/2, height/2 + 60);
+        }
     }
     
-    // 粒子系統
+    // 粒子
     if (random() > 0.8) particles.push(new Bubble(width, random(height), false));
     for (let i = particles.length - 1; i >= 0; i--) {
         particles[i].update();
@@ -281,30 +300,44 @@ function draw() {
         if (particles[i].finished()) particles.splice(i, 1);
     }
     
-    pop(); // 結束震動偏移
+    pop();
 }
 
 function gameOver() {
     gameState = 2;
     stopFallingSequence();
-    // 死亡時的聲音可以長一點
+    
+    // 播放一個長一點的死亡音效
     if(isAudioReady) {
        collisionSynth.triggerAttackRelease("C1", "1n");
     }
+    
+    // ★ 設定重啟冷卻時間 ★
+    canRestart = false;
+    setTimeout(() => {
+        canRestart = true;
+    }, 1000); // 1秒後才能重來，避免誤觸
 }
 
-function mousePressed() {
-    if (!isAudioReady) return;
+function handleInput(e) {
+    if(e && e.cancelable) e.preventDefault(); // 防止手機滾動
+    
+    if (!isAudioReady) return false;
 
     if (gameState === 1) {
         let power = random(0.6, 0.9);
         squid.jump(power);
         playJumpSound(power);
-    } else if (gameState === 2) {
+    } else if (gameState === 2 && canRestart) {
+        // ★ 只有在允許重啟時才重啟 ★
         startGame();
     }
     return false;
 }
+
+// 統一處理滑鼠與觸控
+function mousePressed() { return handleInput(null); }
+function touchStarted() { return handleInput(null); }
 
 function windowResized() {
     resizeCanvas(windowWidth, windowHeight);
@@ -321,7 +354,7 @@ function drawBackground() {
 }
 
 // ==========================================
-//  PART 3: 類別
+//  PART 3: 類別 (修正碰撞回傳值)
 // ==========================================
 
 class CaveTerrain {
@@ -367,21 +400,24 @@ class CaveTerrain {
         return map(noise(this.noiseOffset * 0.5 + 100), 0, 1, 50, height-50);
     }
     
-    // ★ 修改碰撞偵測：回傳方向 ★
+    // ★ 關鍵：回傳牆壁的 Y 座標 (Limit) ★
     checkCollision(squid) {
         for (let s of this.segments) {
             if (abs(s.x - squid.pos.x) < 10) {
-                // 縮小判定範圍
+                // 這裡的容錯判定決定了烏賊會不會「卡進去」
+                // 我們稍微放寬一點點 Hitbox
                 let safeZoneTop = s.top;
                 let safeZoneBot = s.bottom;
-                let squidTop = squid.pos.y - squid.size/2 + 10;
-                let squidBot = squid.pos.y + squid.size/2 - 10;
                 
-                if (squidTop < safeZoneTop) return { hit: true, type: 'top' };
-                if (squidBot > safeZoneBot) return { hit: true, type: 'bottom' };
+                // 判定是否碰到
+                let squidTop = squid.pos.y - squid.size/2 + 5;
+                let squidBot = squid.pos.y + squid.size/2 - 5;
+                
+                if (squidTop < safeZoneTop) return { hit: true, type: 'top', limit: safeZoneTop };
+                if (squidBot > safeZoneBot) return { hit: true, type: 'bottom', limit: safeZoneBot };
             }
         }
-        return { hit: false, type: 'none' };
+        return { hit: false, type: 'none', limit: 0 };
     }
 }
 
@@ -418,8 +454,6 @@ class TechSquid {
         this.squish = 1.0;
         this.tentaclePhase = 0;
         this.eyeSize = 15;
-        
-        // ★ HP 與 無敵機制 ★
         this.hp = 3;
         this.invincibleTimer = 0;
         this.isInvincible = false;
@@ -427,9 +461,8 @@ class TechSquid {
     
     takeDamage() {
         this.hp--;
-        this.invincibleTimer = 90; // 無敵 90禎 (約1.5秒)
+        this.invincibleTimer = 90;
         this.isInvincible = true;
-        // 受傷變紅色
         this.bodyColor = color(255, 50, 50);
     }
     
@@ -441,23 +474,27 @@ class TechSquid {
         for(let i=0; i<5; i++) particles.push(new Bubble(this.pos.x, this.pos.y + 30, true));
     }
     
+    // ★ 死亡後的物理：只算重力，不管碰撞 ★
+    updatePhysicsOnly() {
+        this.vel.y += this.gravity;
+        this.vel.mult(this.drag);
+        this.pos.add(this.vel);
+        this.tentaclePhase += 0.05;
+        // 死亡旋轉
+        this.vel.x += 0.05;
+    }
+    
     update() {
         this.vel.y += this.gravity;
         this.vel.mult(this.drag);
         this.pos.add(this.vel);
         
-        // 動畫
         this.squish = lerp(this.squish, 1.0 + sin(frameCount*0.1)*0.05, 0.1);
         
-        // ★ 顏色恢復邏輯 ★
         if (this.isInvincible) {
             this.invincibleTimer--;
-            // 閃爍效果
-            if (frameCount % 10 < 5) {
-                this.bodyColor = color(255, 100, 100, 150); // 半透明紅
-            } else {
-                this.bodyColor = this.baseColor;
-            }
+            if (frameCount % 10 < 5) this.bodyColor = color(255, 100, 100, 150);
+            else this.bodyColor = this.baseColor;
             
             if (this.invincibleTimer <= 0) {
                 this.isInvincible = false;
@@ -474,7 +511,10 @@ class TechSquid {
     display() {
         push();
         translate(this.pos.x, this.pos.y);
-        rotate(this.vel.y * 0.02);
+        
+        // 如果死了，就轉圈圈
+        if (this.hp <= 0) rotate(frameCount * 0.1);
+        else rotate(this.vel.y * 0.02);
         
         noFill(); strokeWeight(4);
         for(let i=-2; i<=2; i++) {
