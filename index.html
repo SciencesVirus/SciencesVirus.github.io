@@ -148,9 +148,9 @@ async function initAudio() {
             pitchDecay: 0.05,
             octaves: 4,
             oscillator: { type: "sine" },
-            envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.1 }
+            envelope: { attack: 0.002, decay: 0.2, sustain: 0, release: 0.1 }
         }).toDestination();
-        pearlSynth.volume.value = 0; // 設為 0dB (最大標準音量)
+        pearlSynth.volume.value = -1; // 設為 0dB (最大標準音量)
         
         levelUpSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "sawtooth" },
@@ -160,7 +160,7 @@ async function initAudio() {
 
         jackpotSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "triangle" },
-            envelope: { attack: 0.1, decay: 0.5, sustain: 0.3, release: 1.0 }
+            envelope: { attack: 0.15, decay: 0.5, sustain: 0.3, release: 1.0 }
         }).toDestination();
         jackpotSynth.volume.value = -12;
 
