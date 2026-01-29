@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - MB02 Fix</title>
+  <title>Cyber Squid - Android BLE Fix</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -33,8 +33,9 @@
     button:disabled { border-color: #555; color: #555; cursor: not-allowed; }
 
     #ble-status {
-        margin-top: 15px; font-size: 14px; color: #888;
+        margin-top: 20px; font-size: 14px; color: #888;
         display: flex; align-items: center; gap: 10px; flex-direction: column;
+        background: rgba(0,0,0,0.5); padding: 10px; border-radius: 10px;
     }
     
     #hud {
@@ -84,38 +85,36 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">MB02 專用連線版</p>
+    <p style="color: #0aa; font-size: 20px;">Android 藍牙修復版</p>
     
     <div class="btn-group">
-        <button id="ble-btn">🔵 連接握力球</button>
+        <button id="ble-btn">🔵 藍牙連線</button>
         <button id="start-btn">開始冒險</button>
     </div>
     
     <div id="ble-status">
-        <span id="p1-status" style="color: #888;">P1: 未連接</span>
+        <span id="p1-status" style="color: #bbb;">提示：請先在系統設定「中斷」握力球連線</span>
         <span id="data-debug" style="color: #555; font-size: 12px; margin-top:5px;">Waiting...</span>
     </div>
   </div>
 
 <script>
 // ==========================================
-//  PART 0: MB02 專用 Web Bluetooth
+//  PART 0: Web Bluetooth 連接系統 (Android 修正)
 // ==========================================
 let bluetoothDevice;
-let gripCharacteristic;
 let lastDataValue = null;
 
-// ★ 關鍵：常用的低功耗藍牙服務 UUID 列表 ★
-// 這裡列出了市面上 90% 握力球可能使用的 UUID，確保瀏覽器允許連線
+// ★ 擴充的 UUID 列表 (增加連線成功率) ★
 const OPTIONAL_SERVICES = [
-    "0000fff0-0000-1000-8000-00805f9b34fb", // 通用 Generic
-    "0000ffe0-0000-1000-8000-00805f9b34fb", // HM-10 / CC2541
-    "0000fee7-0000-1000-8000-00805f9b34fb", // Tencent/WeChat
-    "6e400001-b5a3-f393-e0a9-e50e24dcca9e", // Nordic UART
-    "0000180d-0000-1000-8000-00805f9b34fb"  // Heart Rate (有些握力球會偽裝成心率帶)
+    "0000fff0-0000-1000-8000-00805f9b34fb", // Generic
+    "0000ffe0-0000-1000-8000-00805f9b34fb", // HM-10
+    "0000fee7-0000-1000-8000-00805f9b34fb", // WeChat/Tuya
+    "0000180d-0000-1000-8000-00805f9b34fb", // Heart Rate
+    "0000180f-0000-1000-8000-00805f9b34fb", // Battery Service
+    "6e400001-b5a3-f393-e0a9-e50e24dcca9e"  // Nordic UART
 ];
 
-// 檢查藍牙支援
 if (!navigator.bluetooth) {
     document.getElementById('ble-status').innerText = "⚠️ 此瀏覽器不支援 Web Bluetooth";
 }
@@ -125,85 +124,98 @@ async function connectBLE() {
     const debugMsg = document.getElementById('data-debug');
     
     try {
-        statusMsg.innerText = "請選擇 MB02...";
+        statusMsg.innerText = "掃描 MB02... (請選取)";
+        statusMsg.style.color = "#0ff";
         
-        // 1. 請求裝置 (只過濾 MB 開頭的裝置)
+        // 1. 請求裝置 (只過濾 MB 開頭，防止雜訊)
         const device = await navigator.bluetooth.requestDevice({
-            filters: [{ namePrefix: "MB" }], // ★ 只抓 MB02, MBxx
-            optionalServices: OPTIONAL_SERVICES // ★ 必須列出所有可能的 UUID，否則會連接失敗
+            filters: [{ namePrefix: "MB" }],
+            optionalServices: OPTIONAL_SERVICES
         });
 
-        statusMsg.innerText = "連接 GATT Server...";
+        statusMsg.innerText = "連接中... (若卡住請重開藍牙)";
+        
+        // 監聽斷線
+        device.addEventListener('gattserverdisconnected', onDisconnected);
+
         const server = await device.gatt.connect();
         
         statusMsg.innerText = "尋找服務...";
-        
-        // 2. 聰明搜尋：遍歷所有服務，找到第一個能 Notify 的特徵值
         const services = await server.getPrimaryServices();
+        
         let targetChar = null;
 
-        // 雙層迴圈找特徵值
+        // 2. 暴力搜尋：遍歷所有服務，找第一個能 Notify 的特徵
+        // 這樣就不怕廠商亂改 UUID
         for (const service of services) {
-            console.log("Checking Service:", service.uuid);
             try {
                 const characteristics = await service.getCharacteristics();
                 for (const c of characteristics) {
-                    // 檢查是否有 notify 或 indicate 屬性
                     if (c.properties.notify || c.properties.indicate) {
                         console.log("Found Notify Char:", c.uuid);
                         targetChar = c;
                         break;
                     }
                 }
-            } catch(e) { console.log("Skip service restricted"); }
+            } catch(e) { console.log("Skip restricted service"); }
             if (targetChar) break;
         }
         
-        if (!targetChar) throw new Error("找不到可讀取的數據特徵值 (No Notify)");
+        if (!targetChar) throw new Error("裝置未提供數據通知功能 (No Notify)");
         
-        // 3. 訂閱
+        // 3. 啟動監聽
         await targetChar.startNotifications();
         targetChar.addEventListener('characteristicvaluechanged', handleBLEData);
         
-        // UI 更新
         statusMsg.innerText = `已連線: ${device.name}`;
         statusMsg.style.color = "#0f0";
-        debugMsg.innerText = "準備就緒，請握壓!";
+        debugMsg.innerText = "握壓即可跳躍";
         document.getElementById('ble-btn').innerText = "已連線";
         document.getElementById('ble-btn').disabled = true;
+        
+        // 連接成功也順便初始化音效 (Android 需要用戶手勢)
+        if(!isAudioReady) initAudio();
 
     } catch (error) {
         console.error("BLE Error:", error);
         statusMsg.innerText = "連線失敗";
         statusMsg.style.color = "red";
-        debugMsg.innerText = error.message;
-        // 如果是因為 UUID 不在列表，這裡會顯示錯誤
-        if(error.name === 'NotFoundError') {
-             debugMsg.innerText = "使用者取消或未選擇";
-        } else if (error.name === 'SecurityError') {
-             debugMsg.innerText = "安全性錯誤 (請確認 HTTPS)";
+        
+        if (error.name === 'SecurityError') {
+            debugMsg.innerText = "安全性錯誤：請確保使用 HTTPS";
+        } else if (error.name === 'NetworkError') {
+            debugMsg.innerText = "無法連線：請確認手機已與裝置「取消配對」";
+        } else {
+            debugMsg.innerText = error.message;
         }
     }
+}
+
+function onDisconnected(event) {
+    const device = event.target;
+    document.getElementById('p1-status').innerText = "裝置已斷線";
+    document.getElementById('p1-status').style.color = "red";
+    document.getElementById('ble-btn').disabled = false;
+    document.getElementById('ble-btn').innerText = "重新連線";
 }
 
 function handleBLEData(event) {
     const value = event.target.value;
     
-    // 將 DataView 的所有 bytes 加總，當作一種簡單的 Hash
-    // 因為我們不知道具體哪個 byte 是步數，但只要總和變了，通常代表數值變了
+    // 計算數據特徵值
     let currentSum = 0;
     for (let i = 0; i < value.byteLength; i++) {
         currentSum += value.getUint8(i);
     }
     
-    // 如果數據改變了 (代表有動作)
+    // 若數據改變，觸發跳躍
     if (lastDataValue !== null && currentSum !== lastDataValue) {
-        // 更新 Debug
         document.getElementById('data-debug').innerText = `Signal: ${currentSum}`;
-        document.getElementById('data-debug').style.color = "#fff";
-        setTimeout(() => document.getElementById('data-debug').style.color = "#555", 100);
-        
-        // 觸發跳躍 (僅在遊戲中)
+        // 閃爍 Debug 文字
+        const dbg = document.getElementById('data-debug');
+        dbg.style.color = "#fff";
+        setTimeout(() => dbg.style.color = "#555", 100);
+
         if (gameState === 1) {
             triggerPlayerAction();
         }
@@ -220,9 +232,9 @@ function triggerPlayerAction() {
 }
 
 // ==========================================
-//  PART 1: 聲音系統 (方波池 + 接龍 + 深海)
+//  PART 1: 聲音系統 (修正倒數音效 + 方波珍珠)
 // ==========================================
-let jumpSynth, fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, victorySynth, dieSynth;
+let jumpSynth, fallSynth, collectSynth, levelUpSynth, jackpotSynth, victorySynth, dieSynth;
 let ambientNoise;
 let pearlSynths = [];
 let pearlSynthIndex = 0;
@@ -247,56 +259,32 @@ async function initAudio() {
         if (Tone.context.state !== 'running') await Tone.context.resume();
         Tone.Destination.volume.value = 0;
 
-        jumpSynth = new Tone.Synth({
-            oscillator: { type: "sine" },
-            envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 }
-        }).toDestination();
+        jumpSynth = new Tone.Synth({ oscillator: { type: "sine" }, envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 } }).toDestination();
         jumpSynth.volume.value = -2;
 
-        fallSynth = new Tone.Synth({
-            oscillator: { type: "sine" },
-            envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
-        }).toDestination();
+        fallSynth = new Tone.Synth({ oscillator: { type: "sine" }, envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 } }).toDestination();
         fallSynth.volume.value = -5;
 
-        // Collect (Square Pool - 您最愛的)
+        // Collect (Square Pool)
         for(let i=0; i<15; i++) {
-            let s = new Tone.Synth({
-                oscillator: { type: "square" },
-                envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
-            }).toDestination();
+            let s = new Tone.Synth({ oscillator: { type: "square" }, envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 } }).toDestination();
             s.volume.value = -12;
             pearlSynths.push(s);
         }
         
-        levelUpSynth = new Tone.PolySynth(Tone.Synth, {
-            oscillator: { type: "sawtooth" },
-            envelope: { attack: 0.05, decay: 0.5, sustain: 0.3, release: 1.5 }
-        }).toDestination();
+        levelUpSynth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "sawtooth" }, envelope: { attack: 0.05, decay: 0.5, sustain: 0.3, release: 1.5 } }).toDestination();
         levelUpSynth.volume.value = -8;
 
-        jackpotSynth = new Tone.Synth({
-            oscillator: { type: "square" },
-            envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.1 }
-        }).toDestination();
+        jackpotSynth = new Tone.Synth({ oscillator: { type: "square" }, envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.1 } }).toDestination();
         jackpotSynth.volume.value = -10;
 
-        victorySynth = new Tone.PolySynth(Tone.Synth, {
-            oscillator: { type: "fatsawtooth", count: 3, spread: 30 },
-            envelope: { attack: 0.1, decay: 0.5, sustain: 1.0, release: 4.0 }
-        }).toDestination();
+        victorySynth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "fatsawtooth", count: 3, spread: 30 }, envelope: { attack: 0.1, decay: 0.5, sustain: 1.0, release: 4.0 } }).toDestination();
         victorySynth.volume.value = -15;
 
-        collisionSynth = new Tone.FMSynth({
-            harmonicity: 3.0, modulationIndex: 10, oscillator: { type: "sine" }, modulation: { type: "square" },
-            envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 },
-            modulationEnvelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 }
-        }).toDestination();
+        collisionSynth = new Tone.FMSynth({ harmonicity: 3.0, modulationIndex: 10, oscillator: { type: "sine" }, modulation: { type: "square" }, envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 }, modulationEnvelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 } }).toDestination();
         collisionSynth.volume.value = -2;
         
-        dieSynth = new Tone.NoiseSynth({
-            noise: { type: "brown" }, envelope: { attack: 0.01, decay: 0.5, sustain: 0 }
-        }).toDestination();
+        dieSynth = new Tone.NoiseSynth({ noise: { type: "brown" }, envelope: { attack: 0.01, decay: 0.5, sustain: 0 } }).toDestination();
         dieSynth.volume.value = -2;
 
         let filter = new Tone.Filter(200, "lowpass").toDestination();
@@ -304,8 +292,9 @@ async function initAudio() {
         ambientNoise.volume.value = -22;
         ambientNoise.start();
 
-        const testBeep = new Tone.Synth().toDestination();
-        testBeep.triggerAttackRelease("C6", "32n");
+        // ★ 移除這裡的 C6 測試音，避免干擾倒數第一聲 ★
+        // const testBeep = new Tone.Synth().toDestination();
+        // testBeep.triggerAttackRelease("C6", "32n");
 
         isAudioReady = true;
         document.getElementById('overlay').style.display = 'none';
@@ -324,12 +313,8 @@ function playJumpSound(power) {
     stopFallingSequence();
     let pitch = map(power, 0.0, 1.0, 300, 700);
     lastJumpPitch = pitch;
-    
-    if (squid && squid.evolutionLevel >= 5) {
-        jumpSynth.oscillator.type = "square"; jumpSynth.volume.value = -12;
-    } else {
-        jumpSynth.oscillator.type = "sine"; jumpSynth.volume.value = -2;
-    }
+    if (squid && squid.evolutionLevel >= 5) { jumpSynth.oscillator.type = "square"; jumpSynth.volume.value = -12; }
+    else { jumpSynth.oscillator.type = "sine"; jumpSynth.volume.value = -2; }
     try { jumpSynth.triggerAttackRelease(pitch, "8n"); } catch(e){}
 }
 
@@ -351,34 +336,18 @@ function playCollectSound(comboIndex) {
     } catch(e){}
 }
 
-function playLevelUpSound() {
-    if (!isAudioReady) return;
-    try { levelUpSynth.triggerAttackRelease(["C5", "E5", "G5", "C6"], "8n"); } catch(e){}
-}
+function playLevelUpSound() { if (!isAudioReady) return; try { levelUpSynth.triggerAttackRelease(["C5", "E5", "G5", "C6"], "8n"); } catch(e){} }
 
 function playJackpotSound() {
     if (!isAudioReady) return;
     let now = Tone.now();
     let notes = ["C6", "B5", "A5", "G5", "F5", "E5", "D5", "C5", "B4", "A4", "G4", "F4", "E4", "D4", "C4"];
-    for (let i = 0; i < notes.length; i++) {
-        jackpotSynth.triggerAttackRelease(notes[i], "32n", now + (i * 0.05));
-    }
+    for (let i = 0; i < notes.length; i++) { jackpotSynth.triggerAttackRelease(notes[i], "32n", now + (i * 0.05)); }
 }
 
-function playVictorySound() {
-    if (!isAudioReady) return;
-    try { victorySynth.triggerAttackRelease(["C3", "G3", "C4", "E4", "G4", "C5", "E5", "C6"], "1n"); } catch(e){}
-}
-
-function playCollisionSound() {
-    if (!isAudioReady) return;
-    try { collisionSynth.triggerAttackRelease("C3", "8n"); collisionSynth.frequency.rampTo("C2", 0.1); } catch(e){}
-}
-
-function playDieSound() {
-    if (!isAudioReady) return;
-    try { dieSynth.triggerAttackRelease("4n"); collisionSynth.triggerAttackRelease("C2", "2n"); collisionSynth.frequency.rampTo("C1", 1); } catch(e){}
-}
+function playVictorySound() { if (!isAudioReady) return; try { victorySynth.triggerAttackRelease(["C3", "G3", "C4", "E4", "G4", "C5", "E5", "C6"], "1n"); } catch(e){} }
+function playCollisionSound() { if (!isAudioReady) return; try { collisionSynth.triggerAttackRelease("C3", "8n"); collisionSynth.frequency.rampTo("C2", 0.1); } catch(e){} }
+function playDieSound() { if (!isAudioReady) return; try { dieSynth.triggerAttackRelease("4n"); collisionSynth.triggerAttackRelease("C2", "2n"); collisionSynth.frequency.rampTo("C1", 1); } catch(e){} }
 
 function startFallingSequence() {
     if (!isAudioReady || isFallingSoundPlaying) return;
@@ -386,25 +355,19 @@ function startFallingSequence() {
     let currentPitch = lastJumpPitch; let currentGap = 0.15; let currentVol = -5;
     if (squid && squid.evolutionLevel >= 5) { fallSynth.oscillator.type = "square"; fallSynth.volume.value = -12; }
     else { fallSynth.oscillator.type = "sine"; fallSynth.volume.value = -5; }
-
     function playBeat() {
         if (!isFallingSoundPlaying) return;
         let now = Tone.now();
         try { fallSynth.triggerAttackRelease(currentPitch, currentGap * 0.8, now, Tone.dbToGain(currentVol)); } catch(e){}
         currentPitch *= 0.85; currentGap *= 0.8; currentVol -= 2;
-        if (currentPitch > 50 && currentGap > 0.02) {
-            fallTimeoutID = setTimeout(playBeat, currentGap * 1000);
-        } else { isFallingSoundPlaying = false; }
+        if (currentPitch > 50 && currentGap > 0.02) { fallTimeoutID = setTimeout(playBeat, currentGap * 1000); } else { isFallingSoundPlaying = false; }
     }
     playBeat();
 }
-function stopFallingSequence() {
-    isFallingSoundPlaying = false;
-    if (fallTimeoutID) { clearTimeout(fallTimeoutID); fallTimeoutID = null; }
-}
+function stopFallingSequence() { isFallingSoundPlaying = false; if (fallTimeoutID) { clearTimeout(fallTimeoutID); fallTimeoutID = null; } }
 
 // ==========================================
-//  PART 2: 遊戲邏輯 (累積進化)
+//  PART 2: 遊戲邏輯 (累積計數)
 // ==========================================
 let squid;
 let particles = []; let stars = []; let terrain; let pearls = [];
@@ -507,6 +470,7 @@ function draw() {
         squid.display();
         startCountdownTimer--;
         let seconds = ceil(startCountdownTimer / 60);
+        // ★ 倒數音效修正：3,2,1 用 C5，GO 用 C6 ★
         if (startCountdownTimer % 60 === 0 && startCountdownTimer > 0) playCountdownBeep("C5");
         if (startCountdownTimer === 0) playCountdownBeep("C6");
 
