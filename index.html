@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - BLE Debug</title>
+  <title>Cyber Squid - Aggressive BLE</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -19,25 +19,23 @@
       color: #0ff; text-align: center;
     }
     
-    .btn-group { display: flex; gap: 20px; margin-top: 30px; }
+    .btn-group { display: flex; gap: 20px; margin-top: 10px; z-index: 1000;}
     
     button {
-      padding: 15px 40px; font-size: 20px; color: #0ff;
+      padding: 15px 30px; font-size: 18px; color: #0ff;
       background: rgba(0, 255, 255, 0.1); border: 2px solid #0ff; border-radius: 50px;
       cursor: pointer; letter-spacing: 2px;
       box-shadow: 0 0 15px rgba(0, 255, 255, 0.2);
-      transition: all 0.2s;
     }
-    button:hover { background: rgba(0, 255, 255, 0.3); transform: scale(1.05); }
-    button:active { transform: scale(0.95); }
-    button:disabled { border-color: #555; color: #555; cursor: not-allowed; }
+    button:disabled { border-color: #555; color: #555; }
 
-    #ble-status {
-        margin-top: 20px; font-size: 12px; color: #aaa;
-        display: flex; flex-direction: column; align-items: center; gap: 5px;
-        background: rgba(0,0,0,0.8); padding: 15px; border-radius: 10px;
-        width: 80%; max-width: 400px;
-        word-break: break-all; /* 讓長數據換行 */
+    /* 專用 Log 區域 */
+    #console-log {
+        margin-top: 20px; width: 90%; height: 150px;
+        background: rgba(0,0,0,0.8); border: 1px solid #333;
+        color: #0f0; font-family: monospace; font-size: 10px;
+        text-align: left; padding: 10px; overflow-y: auto;
+        white-space: pre-wrap; pointer-events: auto; z-index: 1000;
     }
     
     #hud {
@@ -86,152 +84,145 @@
   <div id="hp-bar">❤❤❤</div>
 
   <div id="overlay">
-    <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">數據偵錯版</p>
+    <h1 style="text-shadow: 0 0 20px #0ff; font-size: 40px; margin-bottom: 0;">深海烏賊</h1>
     
     <div class="btn-group">
-        <button id="ble-btn">🔵 藍牙連線</button>
+        <button id="ble-btn">🔵 暴力連接</button>
         <button id="start-btn">開始冒險</button>
     </div>
     
-    <div id="ble-status">
-        <span id="p1-status" style="color: #bbb;">請先在手機設定斷開握力球</span>
-        <span id="data-raw" style="color: #ff0; font-family: monospace; font-size: 14px;">Raw: --</span>
-        <span id="data-debug" style="color: #555;">Waiting...</span>
-    </div>
+    <div id="console-log">等待操作...<br>請先確認手機藍牙已打開，且握力球「未」連接到手機系統。</div>
   </div>
 
 <script>
 // ==========================================
-//  PART 0: Web Bluetooth 數據偵錯系統
+//  PART 0: 暴力藍牙掃描器 (Aggressive Scanner)
 // ==========================================
 let bluetoothDevice;
-let lastDataBuffer = null; // 用來比對數據是否變化
+let activeCharacteristics = []; // 儲存所有訂閱成功的特徵值
 
-const OPTIONAL_SERVICES = [
+// 這是 Android 瀏覽器的一個坑，必須在這裡宣告所有可能用到的 Service UUID
+// 否則 getPrimaryServices() 會找不到它們
+const ALL_SERVICES = [
     "0000fff0-0000-1000-8000-00805f9b34fb", // Generic
     "0000ffe0-0000-1000-8000-00805f9b34fb", // HM-10
     "0000fee7-0000-1000-8000-00805f9b34fb", // WeChat
     "0000180d-0000-1000-8000-00805f9b34fb", // Heart Rate
-    "6e400001-b5a3-f393-e0a9-e50e24dcca9e"  // Nordic
+    "0000180f-0000-1000-8000-00805f9b34fb", // Battery
+    "00001800-0000-1000-8000-00805f9b34fb", // Access
+    "00001801-0000-1000-8000-00805f9b34fb", // Attribute
+    "0000180a-0000-1000-8000-00805f9b34fb", // Device Info
+    "6e400001-b5a3-f393-e0a9-e50e24dcca9e", // Nordic UART
+    "0000ae00-0000-1000-8000-00805f9b34fb"  // 另一種常見的透傳
 ];
 
+function log(msg, color="#0f0") {
+    const consoleDiv = document.getElementById('console-log');
+    const time = new Date().toLocaleTimeString();
+    consoleDiv.innerHTML += `<span style="color:${color}">[${time}] ${msg}</span><br>`;
+    consoleDiv.scrollTop = consoleDiv.scrollHeight;
+}
+
 if (!navigator.bluetooth) {
-    document.getElementById('ble-status').innerText = "⚠️ 此瀏覽器不支援 Web Bluetooth";
+    log("⚠️ 瀏覽器不支援 Web Bluetooth", "red");
 }
 
 async function connectBLE() {
-    const statusMsg = document.getElementById('p1-status');
-    const debugMsg = document.getElementById('data-debug');
-    
     try {
-        statusMsg.innerText = "掃描 MB02... (請選取)";
-        statusMsg.style.color = "#0ff";
+        log("開始掃描 (NamePrefix: MB)...", "#0ff");
         
         const device = await navigator.bluetooth.requestDevice({
             filters: [{ namePrefix: "MB" }],
-            optionalServices: OPTIONAL_SERVICES
+            optionalServices: ALL_SERVICES // 這裡很重要，必須宣告
         });
 
-        statusMsg.innerText = "連接中...";
+        log(`選取裝置: ${device.name} (ID: ${device.id})`);
         device.addEventListener('gattserverdisconnected', onDisconnected);
+
+        log("正在連接 GATT Server...");
         const server = await device.gatt.connect();
         
-        statusMsg.innerText = "正在尋找數據通道...";
+        log("連接成功！正在列舉服務...", "#0ff");
         const services = await server.getPrimaryServices();
         
-        let targetChar = null;
+        if (services.length === 0) {
+            log("❌ 找不到任何服務 (Services Empty)。可能需要配對或權限不足。", "red");
+            return;
+        }
 
-        // ★ 暴力偵測：訂閱所有可以 Notify 的特徵值 ★
-        // 這樣就不怕漏接
-        let foundAny = false;
-        
+        // ★ 暴力遍歷：針對每一個 Service，抓出每一個 Characteristic ★
         for (const service of services) {
+            log(`>> 發現服務: ${service.uuid}`, "#aaa");
             try {
                 const characteristics = await service.getCharacteristics();
                 for (const c of characteristics) {
+                    // 檢查屬性
+                    let props = [];
+                    if (c.properties.read) props.push("READ");
+                    if (c.properties.write) props.push("WRITE");
+                    if (c.properties.notify) props.push("NOTIFY");
+                    if (c.properties.indicate) props.push("INDICATE");
+                    
+                    log(`   -- 特徵值: ${c.uuid} [${props.join(',')}]`, "#888");
+
+                    // 只要有 Notify 或 Indicate，就訂閱它！
                     if (c.properties.notify || c.properties.indicate) {
-                        console.log("Subscribing to:", c.uuid);
+                        log(`   ★ 嘗試訂閱: ${c.uuid}`, "#ff0");
                         await c.startNotifications();
-                        c.addEventListener('characteristicvaluechanged', handleBLEData);
-                        foundAny = true;
+                        c.addEventListener('characteristicvaluechanged', (e) => handleBLEData(e, c.uuid));
+                        activeCharacteristics.push(c);
                     }
                 }
-            } catch(e) { console.log("Service Access Denied"); }
+            } catch(err) {
+                log(`   XX 無法存取服務內容: ${err}`, "red");
+            }
         }
         
-        if (!foundAny) throw new Error("找不到任何數據輸出 (No Notify)");
-        
-        statusMsg.innerText = `已連線: ${device.name}`;
-        statusMsg.style.color = "#0f0";
-        debugMsg.innerText = "請用力握壓握力球！";
-        document.getElementById('ble-btn').innerText = "已連線";
-        document.getElementById('ble-btn').disabled = true;
-        
-        if(!isAudioReady) initAudio();
+        if (activeCharacteristics.length > 0) {
+            log(`✅ 成功訂閱 ${activeCharacteristics.length} 個數據源！請握壓握力球！`, "#0f0");
+            document.getElementById('ble-btn').innerText = "已連線";
+            document.getElementById('ble-btn').disabled = true;
+            if(!isAudioReady) initAudio();
+        } else {
+            log("⚠️ 沒有找到任何可訂閱的數據源", "orange");
+        }
 
     } catch (error) {
-        console.error("BLE Error:", error);
-        statusMsg.innerText = "連線失敗";
-        statusMsg.style.color = "red";
-        debugMsg.innerText = error.message;
+        log(`連線錯誤: ${error.message}`, "red");
     }
 }
 
 function onDisconnected(event) {
-    document.getElementById('p1-status').innerText = "裝置已斷線";
-    document.getElementById('p1-status').style.color = "red";
+    log("❌ 裝置已斷線", "red");
     document.getElementById('ble-btn').disabled = false;
     document.getElementById('ble-btn').innerText = "重新連線";
 }
 
-// ★ 核心除錯：顯示原始 Hex 數據 ★
-function handleBLEData(event) {
+// 數據處理：只要有數據進來，就印出來並觸發跳躍
+function handleBLEData(event, uuid) {
     const value = event.target.value; // DataView
-    const byteLength = value.byteLength;
-    
-    // 轉成 Hex String 顯示 (例如: 01 0A FF)
-    let hexString = "";
-    let dataChanged = false;
-    
-    // 比較數據是否變化
-    if (!lastDataBuffer || lastDataBuffer.byteLength !== byteLength) {
-        dataChanged = true;
-        lastDataBuffer = new Uint8Array(byteLength);
+    let hexArr = [];
+    for (let i = 0; i < value.byteLength; i++) {
+        let byte = value.getUint8(i).toString(16).toUpperCase();
+        if (byte.length < 2) byte = "0" + byte;
+        hexArr.push(byte);
     }
+    const hexString = hexArr.join(" ");
+    
+    // 只顯示前 20 筆 log，避免卡頓
+    // log(`[DATA] ${hexString}`, "#ff0"); // 如果覺得太洗版可以註解掉這行
+    
+    // 視覺回饋：讓 HUD 閃爍
+    document.getElementById('hud').style.color = "#ff0";
+    setTimeout(() => document.getElementById('hud').style.color = "#0ff", 50);
 
-    for (let i = 0; i < byteLength; i++) {
-        let byte = value.getUint8(i);
-        // 轉 16 進位字串
-        let hex = byte.toString(16).toUpperCase();
-        if (hex.length < 2) hex = "0" + hex;
-        hexString += hex + " ";
-        
-        // 檢查內容是否改變
-        if (lastDataBuffer[i] !== byte) {
-            dataChanged = true;
-            lastDataBuffer[i] = byte;
-        }
-    }
-    
-    // 更新 UI
-    const rawDisplay = document.getElementById('data-raw');
-    rawDisplay.innerText = `Raw: ${hexString}`;
-    
-    // 如果數據有變動，讓文字閃爍一下
-    if (dataChanged) {
-        rawDisplay.style.color = "#fff";
-        setTimeout(() => rawDisplay.style.color = "#ff0", 100);
-        
-        // ★ 只要數據有變動，就觸發跳躍 ★
-        // 這樣最靈敏，只要握力球送資料就跳
-        if (gameState === 1) {
-            triggerPlayerAction();
-        } else {
-            // 如果還沒開始遊戲，顯示 Debug 訊息
-            document.getElementById('data-debug').innerText = "收到訊號! (請按開始冒險)";
-            document.getElementById('data-debug').style.color = "#0f0";
-        }
+    // ★ 關鍵：只要有數據進來，就跳躍！ ★
+    if (gameState === 1) {
+        triggerPlayerAction();
+    } else {
+        // 如果遊戲還沒開始，顯示在 log 證明有收到
+        const consoleDiv = document.getElementById('console-log');
+        consoleDiv.innerHTML = `<span style="color:#ff0">[DATA ${new Date().toLocaleTimeString()}] ${hexString}</span><br>` + consoleDiv.innerHTML;
     }
 }
 
@@ -243,7 +234,7 @@ function triggerPlayerAction() {
 }
 
 // ==========================================
-//  PART 1: 聲音系統
+//  PART 1: 聲音系統 (方波池 + 接龍 + 深海)
 // ==========================================
 let jumpSynth, fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, victorySynth, dieSynth;
 let ambientNoise;
@@ -298,7 +289,8 @@ async function initAudio() {
 
         let filter = new Tone.Filter(200, "lowpass").toDestination();
         ambientNoise = new Tone.Noise("brown").connect(filter);
-        ambientNoise.volume.value = -22; ambientNoise.start();
+        ambientNoise.volume.value = -22;
+        ambientNoise.start();
 
         isAudioReady = true;
         document.getElementById('overlay').style.display = 'none';
@@ -306,7 +298,10 @@ async function initAudio() {
         document.getElementById('hp-bar').style.display = 'block';
         startCountdown();
 
-    } catch (e) { console.error("Audio Init Error:", e); document.getElementById('status-msg').innerText = "音效啟動失敗"; }
+    } catch (e) {
+        console.error("Audio Init Error:", e);
+        log(`Audio Init Error: ${e}`);
+    }
 }
 
 function playJumpSound(power) {
@@ -330,7 +325,11 @@ function playCountdownBeep(pitch) {
 function playCollectSound(comboIndex) {
     if (!isAudioReady) return;
     let index = (comboIndex % 10);
-    try { pearlSynths[pearlSynthIndex].triggerAttackRelease(noteMap[index], "32n"); pearlSynthIndex = (pearlSynthIndex + 1) % pearlSynths.length; } catch(e){}
+    let note = noteMap[index];
+    try {
+        pearlSynths[pearlSynthIndex].triggerAttackRelease(note, "32n");
+        pearlSynthIndex = (pearlSynthIndex + 1) % pearlSynths.length;
+    } catch(e){}
 }
 
 function playLevelUpSound() { if (!isAudioReady) return; try { levelUpSynth.triggerAttackRelease(["C5", "E5", "G5", "C6"], "8n"); } catch(e){} }
@@ -339,7 +338,9 @@ function playJackpotSound() {
     if (!isAudioReady) return;
     let now = Tone.now();
     let notes = ["C6", "B5", "A5", "G5", "F5", "E5", "D5", "C5", "B4", "A4", "G4", "F4", "E4", "D4", "C4"];
-    for (let i = 0; i < notes.length; i++) { jackpotSynth.triggerAttackRelease(notes[i], "32n", now + (i * 0.05)); }
+    for (let i = 0; i < notes.length; i++) {
+        jackpotSynth.triggerAttackRelease(notes[i], "32n", now + (i * 0.05));
+    }
 }
 
 function playVictorySound() { if (!isAudioReady) return; try { victorySynth.triggerAttackRelease(["C3", "G3", "C4", "E4", "G4", "C5", "E5", "C6"], "1n"); } catch(e){} }
@@ -364,7 +365,7 @@ function startFallingSequence() {
 function stopFallingSequence() { isFallingSoundPlaying = false; if (fallTimeoutID) { clearTimeout(fallTimeoutID); fallTimeoutID = null; } }
 
 // ==========================================
-//  PART 2: 遊戲邏輯
+//  PART 2: 遊戲邏輯 (累積進化)
 // ==========================================
 let squid;
 let particles = []; let stars = []; let terrain; let pearls = [];
@@ -377,6 +378,7 @@ function setup() {
     createCanvas(windowWidth, windowHeight);
     squid = new TechSquid(width * 0.25, height/2);
     terrain = new CaveTerrain();
+    
     document.getElementById('start-btn').onclick = initAudio;
     document.getElementById('ble-btn').onclick = connectBLE;
     noLoop();
@@ -460,6 +462,7 @@ function draw() {
 
     } else if (gameState === 1) {
         gameSpeed += 0.0002;
+        
         let hasPearlOnScreen = pearls.some(p => p.pos.x > 0 && p.pos.x < width);
         if (comboCount > 0) {
             if (hasPearlOnScreen) comboTimer--;
