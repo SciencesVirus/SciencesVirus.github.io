@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Grand Victory</title>
+  <title>Cyber Squid - Deep Sea Audio</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -100,17 +100,17 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">完全制霸音效版</p>
+    <p style="color: #0aa; font-size: 20px;">深海慵懶音效版</p>
     <button id="start-btn">開始冒險</button>
     <p id="status-msg">請點擊按鈕以啟動音效</p>
   </div>
 
 <script>
 // ==========================================
-//  PART 1: 聲音系統 (新增 Victory Synth)
+//  PART 1: 聲音系統 (深海低頻優化)
 // ==========================================
-let jumpSynth, fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, victorySynth, dieSynth;
-let bubbleSynth, pearlSynth, ambientNoise;
+let jumpSynth, fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, dieSynth;
+let bubbleSynth, pearlSynth, ambientNoise, ambientFilter;
 let isAudioReady = false;
 let audioInitStarted = false;
 let lastJumpPitch = 600;
@@ -131,45 +131,42 @@ async function initAudio() {
         if (Tone.context.state !== 'running') await Tone.context.resume();
         Tone.Destination.volume.value = 0;
 
+        // 1. Jump
         jumpSynth = new Tone.Synth({
             oscillator: { type: "sine" },
             envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 }
         }).toDestination();
         jumpSynth.volume.value = -2;
 
+        // 2. Fall
         fallSynth = new Tone.Synth({
             oscillator: { type: "sine" },
             envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
         }).toDestination();
         fallSynth.volume.value = -5;
 
+        // 3. Collect (珍珠) - 保持清脆，但不需要太高頻
         pearlSynth = new Tone.MembraneSynth({
             pitchDecay: 0.05, octaves: 4, oscillator: { type: "sine" },
             envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.1 }
         }).toDestination();
-        pearlSynth.volume.value = 0;
+        pearlSynth.volume.value = -2;
         
+        // 4. Level Up
         levelUpSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "sawtooth" },
             envelope: { attack: 0.05, decay: 0.5, sustain: 0.3, release: 1.5 }
         }).toDestination();
         levelUpSynth.volume.value = -8;
 
+        // 5. Jackpot
         jackpotSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "triangle" },
             envelope: { attack: 0.1, decay: 0.5, sustain: 0.3, release: 1.0 }
         }).toDestination();
         jackpotSynth.volume.value = -12;
 
-        // ★ 8. Victory Synth (完全制霸音效) ★
-        // 使用 "fatsawtooth" (厚實鋸齒波) 模擬銅管樂器的輝煌感
-        victorySynth = new Tone.PolySynth(Tone.Synth, {
-            oscillator: { type: "fatsawtooth", count: 3, spread: 30 },
-            // Attack 慢，Sustain 長，Release 超長 (3秒)
-            envelope: { attack: 0.05, decay: 0.5, sustain: 1.0, release: 3.0 }
-        }).toDestination();
-        victorySynth.volume.value = -6; // 稍微大聲一點點
-
+        // 6. Collision
         collisionSynth = new Tone.FMSynth({
             harmonicity: 3.0, modulationIndex: 10, oscillator: { type: "sine" }, modulation: { type: "square" },
             envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 },
@@ -177,30 +174,44 @@ async function initAudio() {
         }).toDestination();
         collisionSynth.volume.value = -2;
         
+        // 7. Death
         dieSynth = new Tone.NoiseSynth({
             noise: { type: "brown" }, envelope: { attack: 0.01, decay: 0.5, sustain: 0 }
         }).toDestination();
         dieSynth.volume.value = -2;
 
+        // 8. ★ 環境氣泡聲 (任賢齊 Style) ★
+        // 調整參數：更低的音高，更圓潤的包絡線，模擬真實水泡
         bubbleSynth = new Tone.MembraneSynth({
-            pitchDecay: 0.05, octaves: 2, oscillator: { type: "sine" },
-            envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.1 }
+            pitchDecay: 0.1,    // 音高下滑慢一點，比較像大氣泡
+            octaves: 3,         // 變頻範圍適中
+            oscillator: { type: "sine" },
+            envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 } // 尾音稍微長一點點
         }).toDestination();
-        bubbleSynth.volume.value = -15;
+        bubbleSynth.volume.value = -8; // 背景音量
 
-        let filter = new Tone.Filter(200, "lowpass").toDestination();
-        ambientNoise = new Tone.Noise("brown").connect(filter);
-        ambientNoise.volume.value = -20;
+        // 9. ★ 深海低鳴 (Ambient Drone + Tide) ★
+        // 使用 AutoFilter 創造「洋流」的流動感
+        // Filter: 100Hz ~ 300Hz 之間緩慢掃動
+        let autoFilter = new Tone.AutoFilter({
+            frequency: "0.1n", // 極慢速流動 (約10秒一次循環)
+            baseFrequency: 150,
+            octaves: 1.5,
+            filter: { type: "lowpass", rolloff: -24, Q: 1 }
+        }).toDestination().start();
+        
+        ambientNoise = new Tone.Noise("brown").connect(autoFilter);
+        ambientNoise.volume.value = -18; // 深沉的背景底噪
         ambientNoise.start();
 
         const testBeep = new Tone.Synth().toDestination();
-        testBeep.triggerAttackRelease("C6", "32n");
+        testBeep.triggerAttackRelease("C5", "32n");
 
         isAudioReady = true;
         document.getElementById('overlay').style.display = 'none';
         document.getElementById('hud').style.display = 'block';
         document.getElementById('hp-bar').style.display = 'block';
-        startGame();
+        startCountdown();
 
     } catch (e) {
         console.error("Audio Init Error:", e);
@@ -222,6 +233,15 @@ function playJumpSound(power) {
     try { jumpSynth.triggerAttackRelease(pitch, "8n"); } catch(e){}
 }
 
+function playCountdownBeep(pitch) {
+    if (!isAudioReady) return;
+    try {
+        jumpSynth.oscillator.type = "sine";
+        jumpSynth.volume.value = -5;
+        jumpSynth.triggerAttackRelease(pitch, "32n");
+    } catch(e){}
+}
+
 function playCollectSound(comboIndex) {
     if (!isAudioReady) return;
     let index = (comboIndex % 10);
@@ -229,11 +249,15 @@ function playCollectSound(comboIndex) {
     try { pearlSynth.triggerAttackRelease(note, "32n"); } catch(e){}
 }
 
+// ★ 隨機播放擬真氣泡聲 ★
 function playRandomBubble() {
     if (!isAudioReady) return;
-    let notes = ["C6", "E6", "G6", "C7"];
+    // 使用低音音符模擬大氣泡：C2, E2, G2
+    let notes = ["C2", "E2", "G2", "B1"];
     let note = random(notes);
-    try { bubbleSynth.triggerAttackRelease(note, "32n"); } catch(e){}
+    // 隨機一點點音量變化
+    let vel = random(0.5, 1.0);
+    try { bubbleSynth.triggerAttackRelease(note, "16n", undefined, vel); } catch(e){}
 }
 
 function playLevelUpSound() {
@@ -246,10 +270,8 @@ function playJackpotSound() {
     try { jackpotSynth.triggerAttackRelease(["C4", "G4", "C5", "E5"], "2n"); } catch(e){}
 }
 
-// ★ 播放新的勝利音效 ★
 function playVictorySound() {
     if (!isAudioReady) return;
-    // 跨越四個八度的輝煌 C Major 和弦
     try {
         victorySynth.triggerAttackRelease(["C3", "G3", "C4", "E4", "G4", "C5", "E5", "C6"], "1n");
     } catch(e){}
@@ -295,6 +317,7 @@ let squid;
 let particles = []; let stars = []; let terrain; let pearls = [];
 let gameState = 0; let score = 0; let gameSpeed = 3; let shakeAmount = 0; let canRestart = false;
 let comboCount = 0; let comboTimer = 0; const COMBO_TIME_LIMIT = 300; const VICTORY_COMBO = 60;
+let startCountdownTimer = 0;
 
 function setup() {
     createCanvas(windowWidth, windowHeight);
@@ -305,10 +328,7 @@ function setup() {
     noLoop();
 }
 
-function startGame() {
-    gameState = 1; score = 0; gameSpeed = 3.5;
-    comboCount = 0; comboTimer = 0;
-    
+function startCountdown() {
     if (!squid) squid = new TechSquid(width * 0.25, height/2);
     else {
         let savedLevel = squid.evolutionLevel;
@@ -319,8 +339,17 @@ function startGame() {
     }
     terrain.reset(true);
     pearls = []; particles = []; stars = [];
+    
+    gameState = 4; // Countdown
+    startCountdownTimer = 180;
     updateHPDisplay();
     loop();
+}
+
+function startGame() {
+    gameState = 1; score = 0; gameSpeed = 3.5;
+    comboCount = 0; comboTimer = 0;
+    updateHPDisplay();
 }
 
 function updateHPDisplay() {
@@ -372,9 +401,25 @@ function draw() {
         drawBackground();
     }
 
-    if (gameState === 1) {
+    if (gameState === 4) {
+        terrain.display();
+        squid.display();
+        startCountdownTimer--;
+        let seconds = ceil(startCountdownTimer / 60);
+        if (startCountdownTimer % 60 === 0 && startCountdownTimer > 0) playCountdownBeep("C5");
+        if (startCountdownTimer === 0) playCountdownBeep("C6");
+
+        textAlign(CENTER, CENTER); textStyle(BOLD); textSize(150);
+        if (startCountdownTimer > 0) { fill(255); text(seconds, width/2, height/2); }
+        else { fill(0, 255, 255); text("GO!", width/2, height/2); }
+        
+        if (startCountdownTimer < -30) startGame();
+
+    } else if (gameState === 1) {
         gameSpeed += 0.0002;
-        if (random() < 0.02) playRandomBubble();
+        
+        // 氣泡聲頻率：約每 1.5 秒一次 (60fps * 0.015)
+        if (random() < 0.015) playRandomBubble();
 
         let hasPearlOnScreen = pearls.some(p => p.pos.x > 0 && p.pos.x < width);
         if (comboCount > 0) {
@@ -531,9 +576,8 @@ function triggerDeath() {
 
 function triggerVictory() {
     gameState = 3; stopFallingSequence();
-    playVictorySound(); // ★ 播放新的勝利音效 ★
-    canRestart = false;
-    setTimeout(() => { canRestart = true; }, 4000); // ★ 4秒後才能重來 ★
+    playVictorySound();
+    canRestart = false; setTimeout(() => { canRestart = true; }, 4000);
 }
 
 function handleInput(e) {
@@ -545,7 +589,7 @@ function handleInput(e) {
         playJumpSound(power);
     } else if ((gameState === 2 || gameState === 3) && canRestart) {
         squid.evolutionLevel = 0;
-        startGame();
+        startCountdown();
     }
     return false;
 }
