@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Final Debugged</title>
+  <title>Cyber Squid - Sound Fix</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -24,6 +24,13 @@
       background: rgba(0, 255, 255, 0.1); border: 3px solid #0ff; border-radius: 50px;
       cursor: pointer; margin-top: 30px; letter-spacing: 2px;
       box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
+      transition: all 0.2s;
+    }
+
+    button:active {
+        background: #0ff;
+        color: #000;
+        transform: scale(0.95);
     }
     
     #hud {
@@ -78,6 +85,10 @@
         top: 30%;
     }
     
+    #status-msg {
+        margin-top: 15px; font-size: 14px; color: #888;
+    }
+    
     @keyframes floatUp {
         0% { transform: translateY(0) scale(1); opacity: 1; }
         50% { transform: translateY(-30px) scale(1.5); opacity: 1; }
@@ -98,18 +109,17 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">呆萌生態 • 穩定音效版</p>
+    <p style="color: #0aa; font-size: 20px;">呆萌花園鰻 • 音效修復版</p>
     <button id="start-btn">開始冒險</button>
-    <p id="error-msg" style="color: red; font-size: 12px; margin-top: 10px; display: none;"></p>
+    <p id="status-msg">請點擊按鈕以啟動音效</p>
   </div>
 
 <script>
 // ==========================================
-//  PART 1: 聲音系統 (加強容錯)
+//  PART 1: 聲音系統 (暴力喚醒版)
 // ==========================================
 let jumpSynth, fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, dieSynth;
 let isAudioReady = false;
-let audioInitStarted = false; // 防止重複點擊
 let lastJumpPitch = 600;
 let fallTimeoutID = null;
 let isFallingSoundPlaying = false;
@@ -120,56 +130,67 @@ const noteMap = [
     "C7", "E7", "G7"
 ];
 
+// 初始化音效 (綁定在按鈕點擊事件)
 async function initAudio() {
-    if (audioInitStarted) return;
-    audioInitStarted = true;
-    
     const btn = document.getElementById('start-btn');
+    const msg = document.getElementById('status-msg');
+    
     btn.innerText = "啟動中...";
     
     try {
+        // 1. 強制啟動 Tone.js context
         await Tone.start();
         
-        // 1. Jump
+        // 2. 如果瀏覽器還在裝死，再次強制 resume
+        if (Tone.context.state !== 'running') {
+            await Tone.context.resume();
+        }
+        
+        // 3. 設定主音量 (確保沒有被靜音)
+        Tone.Destination.volume.value = 0; // 0 dB (標準音量)
+
+        // --- 合成器定義 ---
+
+        // 1. 跳躍 (Sine)
         jumpSynth = new Tone.Synth({
             oscillator: { type: "sine" },
             envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 }
         }).toDestination();
         jumpSynth.volume.value = -2;
 
-        // 2. Fall
+        // 2. 掉落 (Sine)
         fallSynth = new Tone.Synth({
             oscillator: { type: "sine" },
             envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
         }).toDestination();
         fallSynth.volume.value = -5;
 
-        // 3. Collect (方波，穩定版)
-        // 修正：maxPolyphony 不放在 options 裡
+        // 3. 收集 (最穩定：Triangle + 短Envelope)
+        // 使用 PolySynth 的正確參數傳遞方式
         collectSynth = new Tone.PolySynth(Tone.Synth, {
-            oscillator: { type: "square" },
+            oscillator: { type: "triangle" },
             envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
-        });
-        collectSynth.maxPolyphony = 20; // 在外部設定
-        collectSynth.toDestination();
-        collectSynth.volume.value = -12;
+        }).toDestination();
+        // 增加發聲數限制
+        collectSynth.maxPolyphony = 20;
+        collectSynth.volume.value = -5;
         
-        // 4. Level Up
+        // 4. 升級
         levelUpSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "sawtooth" },
             envelope: { attack: 0.05, decay: 0.5, sustain: 0.3, release: 1.5 }
         }).toDestination();
         levelUpSynth.volume.value = -8;
 
-        // 5. Jackpot (修正參數，不爆音)
+        // 5. Jackpot (溫柔不爆音)
         jackpotSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "triangle" },
-            // Attack 0.1s (快一點), Release 1.0s (不拖泥帶水)
+            // Attack 0.1s (快), Release 1.0s (乾淨)
             envelope: { attack: 0.1, decay: 0.5, sustain: 0.3, release: 1.0 }
         }).toDestination();
         jackpotSynth.volume.value = -12;
 
-        // 6. Collision
+        // 6. 碰撞
         collisionSynth = new Tone.FMSynth({
             harmonicity: 3.0, modulationIndex: 10, oscillator: { type: "sine" }, modulation: { type: "square" },
             envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 },
@@ -177,28 +198,31 @@ async function initAudio() {
         }).toDestination();
         collisionSynth.volume.value = -2;
         
-        // 7. Death
+        // 7. 死亡
         dieSynth = new Tone.NoiseSynth({
             noise: { type: "brown" },
             envelope: { attack: 0.01, decay: 0.5, sustain: 0 }
         }).toDestination();
         dieSynth.volume.value = -2;
 
+        // 4. 播放測試音 (Beep!) 以確認系統運作
+        const testBeep = new Tone.Synth().toDestination();
+        testBeep.triggerAttackRelease("C6", "16n");
+
         isAudioReady = true;
-        console.log("Audio Initialized Successfully");
+        console.log("Audio Engine Started. Context State:", Tone.context.state);
         
+        // 開始遊戲
+        document.getElementById('overlay').style.display = 'none';
+        document.getElementById('hud').style.display = 'block';
+        document.getElementById('hp-bar').style.display = 'block';
+        startGame();
+
     } catch (e) {
-        console.error("Audio Init Failed:", e);
-        document.getElementById('error-msg').innerText = "音效載入失敗，將以靜音模式遊玩";
-        document.getElementById('error-msg').style.display = 'block';
-        // 就算失敗也繼續遊戲
+        console.error("Audio Init Error:", e);
+        msg.innerText = "音效啟動失敗，請重新整理網頁試試";
+        msg.style.color = "red";
     }
-    
-    // 進入遊戲
-    document.getElementById('overlay').style.display = 'none';
-    document.getElementById('hud').style.display = 'block';
-    document.getElementById('hp-bar').style.display = 'block';
-    startGame();
 }
 
 function playJumpSound(power) {
@@ -214,7 +238,8 @@ function playJumpSound(power) {
         jumpSynth.oscillator.type = "sine";
         jumpSynth.volume.value = -2;
     }
-    jumpSynth.triggerAttackRelease(pitch, "8n");
+    // 使用 catch 避免未預期的錯誤導致崩潰
+    try { jumpSynth.triggerAttackRelease(pitch, "8n"); } catch(e){}
 }
 
 function playCollectSound(comboIndex) {
@@ -222,31 +247,34 @@ function playCollectSound(comboIndex) {
     let index = (comboIndex % 10);
     let rootNote = noteMap[index];
     let harmNote = noteMap[(index + 2) % noteMap.length];
-    collectSynth.triggerAttackRelease([rootNote, harmNote], "16n", undefined, 1);
+    try { collectSynth.triggerAttackRelease([rootNote, harmNote], "16n", undefined, 1); } catch(e){}
 }
 
 function playLevelUpSound() {
     if (!isAudioReady) return;
-    levelUpSynth.triggerAttackRelease(["C5", "E5", "G5", "C6"], "8n");
+    try { levelUpSynth.triggerAttackRelease(["C5", "E5", "G5", "C6"], "8n"); } catch(e){}
 }
 
 function playJackpotSound() {
     if (!isAudioReady) return;
-    // 減少同時發聲數，避免 Clip
-    jackpotSynth.triggerAttackRelease(["C4", "G4", "C5", "E5"], "2n");
+    try { jackpotSynth.triggerAttackRelease(["C4", "G4", "C5", "E5"], "2n"); } catch(e){}
 }
 
 function playCollisionSound() {
     if (!isAudioReady) return;
-    collisionSynth.triggerAttackRelease("C3", "8n");
-    collisionSynth.frequency.rampTo("C2", 0.1);
+    try {
+        collisionSynth.triggerAttackRelease("C3", "8n");
+        collisionSynth.frequency.rampTo("C2", 0.1);
+    } catch(e){}
 }
 
 function playDieSound() {
     if (!isAudioReady) return;
-    dieSynth.triggerAttackRelease("4n");
-    collisionSynth.triggerAttackRelease("C2", "2n");
-    collisionSynth.frequency.rampTo("C1", 1);
+    try {
+        dieSynth.triggerAttackRelease("4n");
+        collisionSynth.triggerAttackRelease("C2", "2n");
+        collisionSynth.frequency.rampTo("C1", 1);
+    } catch(e){}
 }
 
 function startFallingSequence() {
@@ -267,7 +295,7 @@ function startFallingSequence() {
     function playBeat() {
         if (!isFallingSoundPlaying) return;
         let now = Tone.now();
-        fallSynth.triggerAttackRelease(currentPitch, currentGap * 0.8, now, Tone.dbToGain(currentVol));
+        try { fallSynth.triggerAttackRelease(currentPitch, currentGap * 0.8, now, Tone.dbToGain(currentVol)); } catch(e){}
         currentPitch *= 0.85; currentGap *= 0.8; currentVol -= 2;
         if (currentPitch > 50 && currentGap > 0.02) {
             fallTimeoutID = setTimeout(playBeat, currentGap * 1000);
@@ -281,7 +309,7 @@ function stopFallingSequence() {
 }
 
 // ==========================================
-//  PART 2: 遊戲邏輯 (修正版)
+//  PART 2: 遊戲邏輯
 // ==========================================
 let squid;
 let particles = [];
@@ -304,7 +332,7 @@ function setup() {
     terrain = new CaveTerrain();
     
     let btn = document.getElementById('start-btn');
-    // 使用單一監聽器，避免重複
+    // 使用 onclick 直接綁定，確保是用戶觸發
     btn.onclick = initAudio;
     
     noLoop();
@@ -317,14 +345,12 @@ function startGame() {
     comboCount = 0;
     comboTimer = 0;
     
-    // 重置位置，但不重置 evolutionLevel (除非是 Level 0 的初始狀態)
     if (!squid) squid = new TechSquid(width * 0.25, height/2);
     else {
         let savedLevel = squid.evolutionLevel;
         squid.reset(width * 0.25, height/2);
-        squid.evolutionLevel = savedLevel; // 保留等級
+        squid.evolutionLevel = savedLevel;
         squid.updateColorByLevel();
-        // 修正大小
         squid.size = 60 + (min(savedLevel, 5) * 5);
     }
     
@@ -419,7 +445,6 @@ function draw() {
                 comboTimer = COMBO_TIME_LIMIT;
                 score += 100 + (comboCount * 50);
                 
-                // 進化邏輯：每10級進化一次
                 let potentialLevel = floor(comboCount / 10);
                 if (potentialLevel > squid.evolutionLevel && potentialLevel <= 5) {
                     squid.setEvolution(potentialLevel);
@@ -431,7 +456,6 @@ function draw() {
                     for(let k=0; k<20; k++) stars.push(new StarParticle(p.pos.x, p.pos.y));
                 }
                 
-                // 音效互斥邏輯
                 if (comboCount > 0 && comboCount % 10 === 0) {
                     playJackpotSound();
                     score += 1000;
@@ -474,7 +498,6 @@ function draw() {
             if (!squid.isInvincible) {
                 squid.takeDamage();
                 comboCount = 0;
-                // 受傷不退化
                 shakeAmount = 15;
                 playCollisionSound();
                 updateHPDisplay();
@@ -517,7 +540,6 @@ function draw() {
         if (stars[i].finished()) stars.splice(i, 1);
     }
     
-    // UI 最後繪製
     if (gameState === 1 && comboCount > 0) {
         let barWidth = map(comboTimer, 0, COMBO_TIME_LIMIT, 0, 200);
         let hasPearlOnScreen = pearls.some(p => p.pos.x > 0 && p.pos.x < width);
@@ -548,22 +570,28 @@ function triggerDeath() {
 
 function handleInput(e) {
     if(e && e.cancelable) e.preventDefault();
-    if (!isAudioReady) return false;
-
+    
+    // 如果是遊戲中點擊，處理跳躍
     if (gameState === 1) {
         let power = random(0.6, 0.9);
         squid.jump(power);
         playJumpSound(power);
-    } else if (gameState === 2 && canRestart) {
-        // 重來時，重置所有狀態 (包含退化回烏賊)
-        squid.evolutionLevel = 0;
+    }
+    // 如果是死亡畫面且允許重開
+    else if (gameState === 2 && canRestart) {
+        squid.evolutionLevel = 0; // 重置進化
         startGame();
     }
     return false;
 }
 
-function mousePressed() { return handleInput(null); }
-function touchStarted() { return handleInput(null); }
+function mousePressed() {
+    // 只有在遊戲開始後才接管滑鼠，避免擋住 start 按鈕
+    if (gameState !== 0) return handleInput(null);
+}
+function touchStarted() {
+    if (gameState !== 0) return handleInput(null);
+}
 
 function windowResized() {
     resizeCanvas(windowWidth, windowHeight);
@@ -618,6 +646,7 @@ class CaveObstacle {
             endShape(CLOSE);
             fill(255, 200); ellipse(0, 0, 5, 5);
         } else if (this.type === 'eel') {
+            // ★ 花園鰻：白色底 + 黑色斑點 ★
             let sway = sin(this.timer) * 15;
             let dir = (this.side === 'top') ? 1 : -1;
             
@@ -629,19 +658,23 @@ class CaveObstacle {
             bezierVertex(0, 20*dir, sway, 40*dir, sway*0.5, 70*dir);
             endShape();
             
+            // 斑點
             noStroke(); fill(50);
             ellipse(0, 15*dir, 5, 5);
             ellipse(sway*0.3, 40*dir, 5, 5);
 
+            // 頭部
             fill(240);
             let headX = sway*0.5;
             let headY = 70*dir;
             ellipse(headX, headY, 20, 24);
             
+            // 眼白
             fill(255);
             ellipse(headX - 5, headY - 2, this.leftEyeSize+2, this.leftEyeSize+2);
             ellipse(headX + 5, headY + 2, this.rightEyeSize+2, this.rightEyeSize+2);
             
+            // 眼珠 (鬥雞眼/亂看)
             fill(0);
             ellipse(headX - 5 + this.pupilOffsetLeft.x, headY - 2 + this.pupilOffsetLeft.y, 2, 2);
             ellipse(headX + 5 + this.pupilOffsetRight.x, headY + 2 + this.pupilOffsetRight.y, 2, 2);
@@ -745,10 +778,7 @@ class Pearl {
 
 class TechSquid {
     constructor(x, y) {
-        this.reset(x, y);
-        this.size = 60;
-        this.baseColor = color(0, 255, 255);
-        this.evolutionLevel = 0;
+        this.reset(x, y); this.size = 60; this.baseColor = color(0, 255, 255); this.evolutionLevel = 0;
     }
     reset(x, y) {
         this.pos = createVector(x, y); this.vel = createVector(0, 0);
@@ -815,7 +845,6 @@ class TechSquid {
         let level = this.evolutionLevel;
         if (level > 5) level = 5;
 
-        // ★ 確保每一級都有繪圖 ★
         switch(level) {
             case 0: this.drawSquid(); break;
             case 1: this.drawCuttlefish(); break;
