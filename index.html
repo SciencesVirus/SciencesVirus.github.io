@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Logic Fixed</title>
+  <title>Cyber Squid - HID Grip Controller</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -19,11 +19,22 @@
       color: #0ff; text-align: center;
     }
     
+    .btn-group { display: flex; gap: 20px; margin-top: 30px; }
+    
     button {
-      padding: 20px 60px; font-size: 24px; color: #0ff;
-      background: rgba(0, 255, 255, 0.1); border: 3px solid #0ff; border-radius: 50px;
-      cursor: pointer; margin-top: 30px; letter-spacing: 2px;
-      box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
+      padding: 15px 40px; font-size: 20px; color: #0ff;
+      background: rgba(0, 255, 255, 0.1); border: 2px solid #0ff; border-radius: 50px;
+      cursor: pointer; letter-spacing: 2px;
+      box-shadow: 0 0 15px rgba(0, 255, 255, 0.2);
+      transition: all 0.2s;
+    }
+    button:hover { background: rgba(0, 255, 255, 0.3); transform: scale(1.05); }
+    button:active { transform: scale(0.95); }
+    button:disabled { border-color: #555; color: #555; cursor: not-allowed; }
+
+    #hid-status {
+        margin-top: 15px; font-size: 14px; color: #888;
+        display: flex; align-items: center; gap: 10px; flex-direction: column;
     }
     
     #hud {
@@ -40,52 +51,25 @@
     }
 
     .combo-text {
-        position: absolute;
-        color: #ffff00;
-        font-weight: bold;
-        font-size: 24px;
-        pointer-events: none;
-        animation: floatUp 1s forwards;
-        text-shadow: 0 0 10px #ffaa00;
-        z-index: 10;
+        position: absolute; color: #ffff00; font-weight: bold; font-size: 24px;
+        pointer-events: none; animation: floatUp 1s forwards; text-shadow: 0 0 10px #ffaa00; z-index: 10;
     }
-    
     .jackpot-text {
-        position: absolute;
-        color: #FFD700;
-        font-weight: bold;
-        font-size: 50px;
-        pointer-events: none;
-        animation: zoomOut 3s forwards;
-        text-shadow: 0 0 30px #ffffff;
-        z-index: 20;
-        width: 100%;
-        text-align: center;
-        top: 35%;
+        position: absolute; color: #FFD700; font-weight: bold; font-size: 50px;
+        pointer-events: none; animation: zoomOut 3s forwards; text-shadow: 0 0 30px #ffffff;
+        z-index: 20; width: 100%; text-align: center; top: 35%;
     }
-    
     .evo-text {
-        position: absolute;
-        color: #00ffff;
-        font-weight: bold;
-        font-size: 40px;
-        pointer-events: none;
-        animation: zoomOut 2s forwards;
-        text-shadow: 0 0 20px #ffffff;
-        z-index: 20;
-        width: 100%;
-        text-align: center;
-        top: 30%;
+        position: absolute; color: #00ffff; font-weight: bold; font-size: 40px;
+        pointer-events: none; animation: zoomOut 2s forwards; text-shadow: 0 0 20px #ffffff;
+        z-index: 20; width: 100%; text-align: center; top: 30%;
     }
-    
-    #status-msg { margin-top: 15px; font-size: 14px; color: #888; }
     
     @keyframes floatUp {
         0% { transform: translateY(0) scale(1); opacity: 1; }
         50% { transform: translateY(-30px) scale(1.5); opacity: 1; }
         100% { transform: translateY(-60px) scale(1); opacity: 0; }
     }
-    
     @keyframes zoomOut {
         0% { transform: scale(0.5); opacity: 0; }
         50% { transform: scale(1.2); opacity: 1; }
@@ -100,14 +84,125 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">邏輯修正版</p>
-    <button id="start-btn">開始冒險</button>
-    <p id="status-msg">請點擊按鈕以啟動音效</p>
+    <p style="color: #0aa; font-size: 20px;">握力球 HID 連線版</p>
+    
+    <div class="btn-group">
+        <button id="hid-btn">🔵 連接握力球</button>
+        <button id="start-btn">開始冒險</button>
+    </div>
+    
+    <div id="hid-status">
+        <span id="p1-status" style="color: #888;">P1: 未連接</span>
+        <span id="p2-status" style="color: #444; font-size: 12px;">P2: 未連接</span>
+        <span id="data-debug" style="color: #555; font-size: 12px; margin-top:5px;">Steps: --</span>
+    </div>
   </div>
 
 <script>
 // ==========================================
-//  PART 1: 聲音系統 (維持原案：方波池 + 接龍音)
+//  PART 0: WebHID 握力球連接系統
+// ==========================================
+const GRIP_VENDOR_ID = 0x08E2;
+const GRIP_PRODUCT_ID = 0x0101;
+
+let player1Device = null;
+let player2Device = null;
+let p1LastSteps = -1; // 記錄 P1 上一次的步數
+
+// 檢查瀏覽器支援
+if (!("hid" in navigator)) {
+    document.getElementById('hid-status').innerText = "⚠️ 您的瀏覽器不支援 WebHID (請用 Chrome/Edge)";
+}
+
+async function connectHID() {
+    try {
+        // 請求裝置 (過濾特定的 VID/PID)
+        const devices = await navigator.hid.requestDevice({
+            filters: [{ vendorId: GRIP_VENDOR_ID, productId: GRIP_PRODUCT_ID }]
+        });
+
+        if (devices.length === 0) {
+            console.log("未選擇裝置");
+            return;
+        }
+
+        // 處理所有選取的裝置
+        for (let device of devices) {
+            await openDevice(device);
+        }
+
+    } catch (err) {
+        console.error("HID Error:", err);
+    }
+}
+
+async function openDevice(device) {
+    if (!device.opened) {
+        await device.open();
+    }
+    
+    // 綁定輸入監聽
+    device.addEventListener("inputreport", handleInputReport);
+    
+    // 分配 P1 / P2
+    if (!player1Device) {
+        player1Device = device;
+        updateStatus("p1", `P1 已連線: ${device.productName}`, "#0f0");
+        document.getElementById('hid-btn').innerText = "連接第二顆";
+    } else if (player1Device !== device && !player2Device) {
+        player2Device = device;
+        updateStatus("p2", `P2 已連線: ${device.productName}`, "#0f0");
+        document.getElementById('hid-btn').innerText = "裝置已滿";
+        document.getElementById('hid-btn').disabled = true;
+    }
+}
+
+function updateStatus(id, text, color) {
+    const el = document.getElementById(id + '-status');
+    el.innerText = text;
+    el.style.color = color;
+}
+
+// ★ 核心：解析 HID Report (32 bytes) ★
+function handleInputReport(event) {
+    const { data, device } = event;
+    // Python Struct: <LffffffL (Time, Acc*3, Gyr*3, Steps)
+    // 每個 float/long 都是 4 bytes
+    // Steps 在最後面，Offset = 4 * 7 = 28
+    
+    // 確保資料長度足夠
+    if (data.byteLength < 32) return;
+
+    // 只處理 P1 的資料來控制遊戲
+    if (device === player1Device) {
+        // 讀取 offset 28 的 Uint32 (Little Endian)
+        const currentSteps = data.getUint32(28, true);
+        
+        // Debug 顯示
+        document.getElementById('data-debug').innerText = `Steps: ${currentSteps}`;
+
+        // 邏輯：如果步數增加，觸發跳躍
+        if (p1LastSteps !== -1 && currentSteps > p1LastSteps) {
+            if (gameState === 1) { // 遊戲中才觸發
+                triggerPlayerAction();
+            }
+        }
+        p1LastSteps = currentSteps;
+    }
+    
+    // 未來 P2 邏輯可寫在這裡
+}
+
+// 統一觸發動作
+function triggerPlayerAction() {
+    if (!squid) return;
+    let power = random(0.6, 0.9);
+    squid.jump(power);
+    playJumpSound(power);
+}
+
+// ==========================================
+//  PART 1: 聲音系統 (方波池 + 接龍 + 深海)
 // ==========================================
 let jumpSynth, fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, victorySynth, dieSynth;
 let ambientNoise;
@@ -146,7 +241,7 @@ async function initAudio() {
         }).toDestination();
         fallSynth.volume.value = -5;
 
-        // Collect (Audio Pool + Square)
+        // Collect (Square Pool)
         for(let i=0; i<15; i++) {
             let s = new Tone.Synth({
                 oscillator: { type: "square" },
@@ -162,19 +257,17 @@ async function initAudio() {
         }).toDestination();
         levelUpSynth.volume.value = -8;
 
-        // Jackpot (Windows Solitaire)
         jackpotSynth = new Tone.Synth({
             oscillator: { type: "square" },
             envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.1 }
         }).toDestination();
         jackpotSynth.volume.value = -10;
 
-        // Victory
         victorySynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "fatsawtooth", count: 3, spread: 30 },
             envelope: { attack: 0.1, decay: 0.5, sustain: 1.0, release: 4.0 }
         }).toDestination();
-        victorySynth.volume.value = -12;
+        victorySynth.volume.value = -15;
 
         collisionSynth = new Tone.FMSynth({
             harmonicity: 3.0, modulationIndex: 10, oscillator: { type: "sine" }, modulation: { type: "square" },
@@ -188,7 +281,6 @@ async function initAudio() {
         }).toDestination();
         dieSynth.volume.value = -2;
 
-        // Ambient
         let filter = new Tone.Filter(200, "lowpass").toDestination();
         ambientNoise = new Tone.Noise("brown").connect(filter);
         ambientNoise.volume.value = -22;
@@ -294,34 +386,43 @@ function stopFallingSequence() {
 }
 
 // ==========================================
-//  PART 2: 遊戲邏輯 (修正後的 Combo 進化)
+//  PART 2: 遊戲邏輯
 // ==========================================
 let squid;
 let particles = []; let stars = []; let terrain; let pearls = [];
 let gameState = 0; let score = 0; let gameSpeed = 3; let shakeAmount = 0; let canRestart = false;
-let comboCount = 0; let comboTimer = 0; const COMBO_TIME_LIMIT = 300;
+let comboCount = 0; let comboTimer = 0;
+let totalPearls = 0;
+const COMBO_TIME_LIMIT = 300;
+const VICTORY_PEARLS = 60;
+
 let startCountdownTimer = 0;
 
 function setup() {
     createCanvas(windowWidth, windowHeight);
     squid = new TechSquid(width * 0.25, height/2);
     terrain = new CaveTerrain();
-    let btn = document.getElementById('start-btn');
-    btn.onclick = initAudio;
+    
+    document.getElementById('start-btn').onclick = initAudio;
+    document.getElementById('hid-btn').onclick = connectHID; // 改綁定 HID
+    
     noLoop();
 }
 
 function startCountdown() {
     if (!squid) squid = new TechSquid(width * 0.25, height/2);
     else {
-        let savedLevel = squid.evolutionLevel;
         squid.reset(width * 0.25, height/2);
-        squid.evolutionLevel = savedLevel;
+        squid.evolutionLevel = 0;
         squid.updateColorByLevel();
-        squid.size = 60 + (min(savedLevel, 5) * 5);
+        squid.size = 60;
     }
     terrain.reset(true);
     pearls = []; particles = []; stars = [];
+    
+    score = 0;
+    comboCount = 0;
+    totalPearls = 0;
     
     gameState = 4; // Countdown
     startCountdownTimer = 180;
@@ -331,7 +432,6 @@ function startCountdown() {
 
 function startGame() {
     gameState = 1; score = 0; gameSpeed = 3.5;
-    comboCount = 0; comboTimer = 0;
     updateHPDisplay();
 }
 
@@ -420,37 +520,29 @@ function draw() {
             
             if (p.hits(squid)) {
                 comboCount++;
+                totalPearls++;
                 comboTimer = COMBO_TIME_LIMIT;
                 score += 100 + (comboCount * 50);
                 
-                // ★ 修正後的邏輯：只要當前 Combo 是 10 的倍數，就進化 ★
-                // 不需要管現在是第幾關，只要玩家能打出 10 連鎖，就是一個里程碑
-                if (comboCount > 0 && comboCount % 10 === 0) {
-                    
-                    // 如果還是普通動物 (Lv 0-4)，就升級
-                    if (squid.evolutionLevel < 5) {
-                        squid.evolveNext(); // 升一級
-                        playLevelUpSound();
-                        
-                        let names = ["", "透抽進化!", "水母進化!", "海馬進化!", "燈籠魚進化!", "黃金霸主!"];
-                        showEvoText(names[squid.evolutionLevel]);
-                        
-                        squid.hp++;
-                        updateHPDisplay();
-                        for(let k=0; k<20; k++) stars.push(new StarParticle(p.pos.x, p.pos.y));
-                        
-                        // 播放 Jackpot 音效 (接龍)
-                        playJackpotSound();
-                        score += 1000;
-                        showJackpotText();
-                        for(let k=0; k<30; k++) stars.push(new StarParticle(p.pos.x, p.pos.y));
-                    }
-                    // 如果已經是黃金烏賊 (Lv 5)，且又滿了 10 個 Combo -> 勝利
-                    else if (squid.evolutionLevel === 5) {
-                        triggerVictory();
-                    }
+                let potentialLevel = floor(totalPearls / 10);
+                if (potentialLevel <= 5 && potentialLevel > squid.evolutionLevel) {
+                    squid.setEvolution(potentialLevel);
+                    playLevelUpSound();
+                    let names = ["", "透抽進化!", "水母進化!", "海馬進化!", "燈籠魚進化!", "黃金霸主!"];
+                    showEvoText(names[potentialLevel]);
+                    squid.hp++;
+                    updateHPDisplay();
+                    for(let k=0; k<20; k++) stars.push(new StarParticle(p.pos.x, p.pos.y));
+                }
+                
+                if (totalPearls >= VICTORY_PEARLS) {
+                    triggerVictory();
+                } else if (comboCount > 0 && comboCount % 10 === 0) {
+                    playJackpotSound();
+                    score += 1000;
+                    showJackpotText();
+                    for(let k=0; k<30; k++) stars.push(new StarParticle(p.pos.x, p.pos.y));
                 } else {
-                    // 普通吃珠
                     playCollectSound(comboCount);
                     showComboText(screenPosition(p.pos.x), screenPosition(p.pos.y), comboCount);
                     for(let k=0; k<8; k++) particles.push(new Bubble(p.pos.x, p.pos.y, true));
@@ -571,9 +663,7 @@ function handleInput(e) {
     if(e && e.cancelable) e.preventDefault();
     
     if (gameState === 1) {
-        let power = random(0.6, 0.9);
-        squid.jump(power);
-        playJumpSound(power);
+        triggerPlayerAction();
     } else if ((gameState === 2 || gameState === 3) && canRestart) {
         squid.evolutionLevel = 0;
         startCountdown();
@@ -716,7 +806,6 @@ class TechSquid {
         this.hp = 3; this.invincibleTimer = 0; this.isInvincible = false; this.evolutionLevel = 0;
     }
     setEvolution(level) {
-        // ★ 簡化：直接設定等級 ★
         this.evolutionLevel = level;
         this.size = 60 + (min(level, 5) * 5);
     }
