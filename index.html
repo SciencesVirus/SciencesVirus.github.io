@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Modern Audio</title>
+  <title>Cyber Squid - Deep Sea Audio</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -100,17 +100,17 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">洗鍊音效版</p>
+    <p style="color: #0aa; font-size: 20px;">深海科幻音效版</p>
     <button id="start-btn">開始冒險</button>
     <p id="status-msg">請點擊按鈕以啟動音效</p>
   </div>
 
 <script>
 // ==========================================
-//  PART 1: 聲音系統 (移除氣泡，現代化進化音)
+//  PART 1: 聲音系統 (深海氛圍回歸 + 科技進化音)
 // ==========================================
-let jumpSynth, fallSynth, collisionSynth, levelUpSynth, jackpotSynth, victorySynth, dieSynth;
-let pearlSynth, ambientNoise; // 移除 bubbleSynth
+let jumpSynth, fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, victorySynth, dieSynth;
+let pearlSynth, ambientNoise;
 let isAudioReady = false;
 let audioInitStarted = false;
 let lastJumpPitch = 600;
@@ -152,28 +152,31 @@ async function initAudio() {
         }).toDestination();
         pearlSynth.volume.value = -10;
         
-        // 4. Level Up (基本升級音)
+        // 4. Level Up
         levelUpSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "sawtooth" },
             envelope: { attack: 0.05, decay: 0.5, sustain: 0.3, release: 1.5 }
         }).toDestination();
         levelUpSynth.volume.value = -8;
 
-        // 5. ★ Jackpot (進化音效重製 - 賽博脈衝) ★
-        // 不再使用三角波接龍音，改用胖鋸齒波 (FatSawtooth)
-        jackpotSynth = new Tone.PolySynth(Tone.Synth, {
-            oscillator: { type: "fatsawtooth", count: 3, spread: 20 }, // 聲音厚實有科技感
-            // 瞬間爆發，短促有力
-            envelope: { attack: 0.01, decay: 0.4, sustain: 0.1, release: 1.0 }
+        // 5. ★ Jackpot (進化音效重製：Cyber Sci-Fi) ★
+        // 使用 FMSynth 加上很強的 Modulation，製造出「金屬/能量」的質感
+        jackpotSynth = new Tone.PolySynth(Tone.FMSynth, {
+            harmonicity: 2,
+            modulationIndex: 15,
+            oscillator: { type: "square" }, // 基底是方波，很有力
+            modulation: { type: "sine" },
+            envelope: { attack: 0.01, decay: 0.2, sustain: 0, release: 0.5 }, // 短促有力
+            modulationEnvelope: { attack: 0.01, decay: 0.2, sustain: 0, release: 0.5 }
         }).toDestination();
-        jackpotSynth.volume.value = -10;
+        jackpotSynth.volume.value = -12;
 
-        // 6. Victory (完全制霸 - 史詩感)
+        // 6. ★ Victory (完全制霸 - 降音量) ★
         victorySynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "fatsawtooth", count: 3, spread: 30 },
-            envelope: { attack: 0.05, decay: 0.5, sustain: 1.0, release: 3.0 }
+            envelope: { attack: 0.1, decay: 0.5, sustain: 1.0, release: 4.0 } // Attack 稍微放慢一點
         }).toDestination();
-        victorySynth.volume.value = -9;
+        victorySynth.volume.value = -18; // 降音量，避免太吵
 
         // 7. Collision
         collisionSynth = new Tone.FMSynth({
@@ -189,10 +192,11 @@ async function initAudio() {
         }).toDestination();
         dieSynth.volume.value = -2;
 
-        // 9. 環境音 (維持深海低頻)
-        let filter = new Tone.Filter(150, "lowpass").toDestination();
+        // 9. ★ 深海低鳴 (回歸！但刪除氣泡) ★
+        // 只保留深海的低頻轟鳴，提供沉浸感
+        let filter = new Tone.Filter(200, "lowpass").toDestination();
         ambientNoise = new Tone.Noise("brown").connect(filter);
-        ambientNoise.volume.value = -32;
+        ambientNoise.volume.value = -22; // 明顯但不搶戲的音量
         ambientNoise.start();
 
         const testBeep = new Tone.Synth().toDestination();
@@ -245,18 +249,19 @@ function playLevelUpSound() {
     try { levelUpSynth.triggerAttackRelease(["C5", "E5", "G5", "C6"], "8n"); } catch(e){}
 }
 
+// ★ 10 Combo 進化音效 (Sci-Fi Chord) ★
 function playJackpotSound() {
     if (!isAudioReady) return;
-    // ★ 修正：播放一個具有衝擊力的和弦，而不是單音或接龍琶音 ★
-    // C Major Add9 (C4, E4, G4, D5) 瞬間齊奏
+    // 使用 FMSynth 播放一個具有金屬感的 Add9 和弦，聽起來像能量充填
     try {
-        jackpotSynth.triggerAttackRelease(["C4", "E4", "G4", "D5"], "8n");
+        jackpotSynth.triggerAttackRelease(["D4", "F#4", "A4", "E5"], "8n");
     } catch(e){}
 }
 
 function playVictorySound() {
     if (!isAudioReady) return;
     try {
+        // 降低音量後，播放輝煌的大和弦
         victorySynth.triggerAttackRelease(["C3", "G3", "C4", "E4", "G4", "C5", "E5", "C6"], "1n");
     } catch(e){}
 }
@@ -295,7 +300,7 @@ function stopFallingSequence() {
 }
 
 // ==========================================
-//  PART 2: 遊戲邏輯 (移除氣泡呼叫)
+//  PART 2: 遊戲邏輯
 // ==========================================
 let squid;
 let particles = []; let stars = []; let terrain; let pearls = [];
@@ -402,8 +407,6 @@ function draw() {
     } else if (gameState === 1) {
         gameSpeed += 0.0002;
         
-        // ★ 移除：playRandomBubble() ★
-
         let hasPearlOnScreen = pearls.some(p => p.pos.x > 0 && p.pos.x < width);
         if (comboCount > 0) {
             if (hasPearlOnScreen) comboTimer--;
