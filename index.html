@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Final Fix</title>
+  <title>Cyber Squid - Grand Victory</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -100,16 +100,16 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">全修復版</p>
+    <p style="color: #0aa; font-size: 20px;">完全制霸音效版</p>
     <button id="start-btn">開始冒險</button>
     <p id="status-msg">請點擊按鈕以啟動音效</p>
   </div>
 
 <script>
 // ==========================================
-//  PART 1: 聲音系統 (增強珍珠音量)
+//  PART 1: 聲音系統 (新增 Victory Synth)
 // ==========================================
-let jumpSynth, fallSynth, collisionSynth, levelUpSynth, jackpotSynth, dieSynth;
+let jumpSynth, fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, victorySynth, dieSynth;
 let bubbleSynth, pearlSynth, ambientNoise;
 let isAudioReady = false;
 let audioInitStarted = false;
@@ -143,14 +143,11 @@ async function initAudio() {
         }).toDestination();
         fallSynth.volume.value = -5;
 
-        // ★ Collect: MembraneSynth 音量增強 ★
         pearlSynth = new Tone.MembraneSynth({
-            pitchDecay: 0.05,
-            octaves: 4,
-            oscillator: { type: "sine" },
-            envelope: { attack: 0.002, decay: 0.2, sustain: 0, release: 0.1 }
+            pitchDecay: 0.05, octaves: 4, oscillator: { type: "sine" },
+            envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.1 }
         }).toDestination();
-        pearlSynth.volume.value = -1; // 設為 0dB (最大標準音量)
+        pearlSynth.volume.value = 0;
         
         levelUpSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "sawtooth" },
@@ -160,9 +157,18 @@ async function initAudio() {
 
         jackpotSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "triangle" },
-            envelope: { attack: 0.15, decay: 0.5, sustain: 0.3, release: 1.0 }
+            envelope: { attack: 0.1, decay: 0.5, sustain: 0.3, release: 1.0 }
         }).toDestination();
         jackpotSynth.volume.value = -12;
+
+        // ★ 8. Victory Synth (完全制霸音效) ★
+        // 使用 "fatsawtooth" (厚實鋸齒波) 模擬銅管樂器的輝煌感
+        victorySynth = new Tone.PolySynth(Tone.Synth, {
+            oscillator: { type: "fatsawtooth", count: 3, spread: 30 },
+            // Attack 慢，Sustain 長，Release 超長 (3秒)
+            envelope: { attack: 0.05, decay: 0.5, sustain: 1.0, release: 3.0 }
+        }).toDestination();
+        victorySynth.volume.value = -6; // 稍微大聲一點點
 
         collisionSynth = new Tone.FMSynth({
             harmonicity: 3.0, modulationIndex: 10, oscillator: { type: "sine" }, modulation: { type: "square" },
@@ -182,7 +188,6 @@ async function initAudio() {
         }).toDestination();
         bubbleSynth.volume.value = -15;
 
-        // 環境音
         let filter = new Tone.Filter(200, "lowpass").toDestination();
         ambientNoise = new Tone.Noise("brown").connect(filter);
         ambientNoise.volume.value = -20;
@@ -239,6 +244,15 @@ function playLevelUpSound() {
 function playJackpotSound() {
     if (!isAudioReady) return;
     try { jackpotSynth.triggerAttackRelease(["C4", "G4", "C5", "E5"], "2n"); } catch(e){}
+}
+
+// ★ 播放新的勝利音效 ★
+function playVictorySound() {
+    if (!isAudioReady) return;
+    // 跨越四個八度的輝煌 C Major 和弦
+    try {
+        victorySynth.triggerAttackRelease(["C3", "G3", "C4", "E4", "G4", "C5", "E5", "C6"], "1n");
+    } catch(e){}
 }
 
 function playCollisionSound() {
@@ -416,12 +430,7 @@ function draw() {
         squid.update();
         squid.display();
         
-        // ★ 關鍵修正：出界判定 (Dead Zone) ★
-        // 如果被推到畫面左邊 (-50px) 之外，直接視為死亡
-        if (squid.pos.x < -squid.size) {
-            squid.hp = 0; // 強制歸零
-            triggerDeath();
-        }
+        if (squid.pos.x < -squid.size) { squid.hp = 0; triggerDeath(); }
         
         if (squid.vel.y > 2.5 && !isFallingSoundPlaying) startFallingSequence();
 
@@ -436,9 +445,7 @@ function draw() {
                 squid.pos.y = collision.limit - squid.size/2 - 2;
                 if (squid.vel.y > 0) squid.vel.y *= -0.5;
             } else if (obstacleHit) {
-                // 撞到障礙物，用力往左推
-                squid.vel.x = -8;
-                squid.vel.y = random(-5, 5);
+                squid.vel.x = -8; squid.vel.y = random(-5, 5);
             }
 
             if (!squid.isInvincible) {
@@ -457,9 +464,7 @@ function draw() {
         document.getElementById('score-val').innerText = score;
 
     } else if (gameState === 2) {
-        // ★ 死亡後：地形凍結 (不呼叫 terrain.update) ★
         terrain.display();
-        
         squid.updatePhysicsOnly();
         squid.display();
         
@@ -516,7 +521,6 @@ function screenPosition(x, y) { return x; }
 function triggerDeath() {
     gameState = 2; stopFallingSequence(); playDieSound();
     squid.explode();
-    // 爆炸粒子
     for(let k=0; k<20; k++) {
         let b = new Bubble(squid.pos.x, squid.pos.y, true);
         b.vel = p5.Vector.random2D().mult(random(5, 10));
@@ -527,8 +531,9 @@ function triggerDeath() {
 
 function triggerVictory() {
     gameState = 3; stopFallingSequence();
-    playJackpotSound(); playLevelUpSound();
-    canRestart = false; setTimeout(() => { canRestart = true; }, 2000);
+    playVictorySound(); // ★ 播放新的勝利音效 ★
+    canRestart = false;
+    setTimeout(() => { canRestart = true; }, 4000); // ★ 4秒後才能重來 ★
 }
 
 function handleInput(e) {
@@ -563,7 +568,7 @@ function drawBackground() {
 }
 
 // ==========================================
-//  PART 3: 類別 (包含花園鰻 & 進化)
+//  PART 3: 類別
 // ==========================================
 
 class CaveObstacle {
@@ -709,12 +714,9 @@ class TechSquid {
             if(this.evolutionLevel >= 5) this.bodyColor = lerpColor(color(255, 215, 0), color(255, 255, 100), sin(frameCount*0.2)*0.5 + 0.5);
             else this.updateColorByLevel();
         }
-        // ★ 核心物理修正：讓烏賊想辦法回到 X=25% 的位置，但會被撞飛 ★
         let targetX = width * 0.25;
         let diff = targetX - this.pos.x;
-        this.vel.x += diff * 0.01; // 彈簧回復力
-        this.vel.x *= 0.9; // 阻尼
-
+        this.vel.x += diff * 0.01; this.vel.x *= 0.9;
         this.eyeSize = lerp(this.eyeSize, 15, 0.1); this.tentaclePhase += 0.1;
     }
     display() {
