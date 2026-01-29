@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Final Polish</title>
+  <title>Cyber Squid - Infinite Evolution</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -34,8 +34,9 @@
     
     #hp-bar {
         position: absolute; top: 20px; right: 20px;
-        font-size: 30px; color: #ff5555; text-shadow: 0 0 5px #f00;
+        font-size: 24px; color: #ff5555; text-shadow: 0 0 5px #f00;
         display: none;
+        text-align: right;
     }
 
     .combo-text {
@@ -63,11 +64,6 @@
         top: 40%;
     }
     
-    /* 重來按鈕閃爍動畫 */
-    .blink-text {
-        animation: blink 1s infinite;
-    }
-
     @keyframes floatUp {
         0% { transform: translateY(0) scale(1); opacity: 1; }
         50% { transform: translateY(-30px) scale(1.5); opacity: 1; }
@@ -79,12 +75,6 @@
         50% { transform: scale(1.2); opacity: 1; }
         100% { transform: scale(2.0); opacity: 0; }
     }
-    
-    @keyframes blink {
-        0% { opacity: 0.3; }
-        50% { opacity: 1; }
-        100% { opacity: 0.3; }
-    }
   </style>
 </head>
 <body>
@@ -94,13 +84,13 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">無限隨機 • 溫柔音效版</p>
+    <p style="color: #0aa; font-size: 20px;">無限進化版</p>
     <button id="start-btn">開始冒險</button>
   </div>
 
 <script>
 // ==========================================
-//  PART 1: 聲音系統 (溫柔化 Jackpot)
+//  PART 1: 聲音系統 (黃金變聲)
 // ==========================================
 let jumpSynth, fallSynth, collectSynth, collisionSynth, jackpotSynth;
 let isAudioReady = false;
@@ -117,14 +107,14 @@ const noteMap = [
 async function initAudio() {
     await Tone.start();
     
-    // 1. 跳躍
+    // 1. 跳躍 (預設 Sine)
     jumpSynth = new Tone.Synth({
         oscillator: { type: "sine" },
         envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 }
     }).toDestination();
     jumpSynth.volume.value = -2;
 
-    // 2. 掉落
+    // 2. 掉落 (預設 Sine)
     fallSynth = new Tone.Synth({
         oscillator: { type: "sine" },
         envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
@@ -139,13 +129,12 @@ async function initAudio() {
     }).toDestination();
     collectSynth.volume.value = -4;
     
-    // 4. ★ Jackpot 音效修正：溫柔的天堂和聲 ★
-    // 改用 Triangle 波，並且 Attack 慢一點，聽起來像管風琴或弦樂，不刺耳
+    // 4. Jackpot (溫柔和聲)
     jackpotSynth = new Tone.PolySynth(Tone.Synth, {
-        oscillator: { type: "triangle" }, // 柔和的波形
-        envelope: { attack: 0.1, decay: 0.5, sustain: 0.5, release: 2.0 } // 慢起音，長尾韻
+        oscillator: { type: "triangle" },
+        envelope: { attack: 0.1, decay: 0.5, sustain: 0.5, release: 2.0 }
     }).toDestination();
-    jackpotSynth.volume.value = -6; // 音量稍微關小，減少壓迫感
+    jackpotSynth.volume.value = -6;
 
     // 5. 碰撞
     collisionSynth = new Tone.FMSynth({
@@ -167,6 +156,16 @@ function playJumpSound(power) {
     stopFallingSequence();
     let pitch = map(power, 0.0, 1.0, 300, 700);
     lastJumpPitch = pitch;
+    
+    // ★ 黃金模式變聲：方波 (Square Wave) ★
+    if (squid && squid.isGolden) {
+        jumpSynth.oscillator.type = "square";
+        jumpSynth.volume.value = -8; // Square 比較大聲，稍微關小
+    } else {
+        jumpSynth.oscillator.type = "sine";
+        jumpSynth.volume.value = -2;
+    }
+    
     jumpSynth.triggerAttackRelease(pitch, "8n");
 }
 
@@ -180,7 +179,6 @@ function playCollectSound(comboIndex) {
 
 function playJackpotSound() {
     if (!isAudioReady) return;
-    // 播放一個溫柔的大和弦
     jackpotSynth.triggerAttackRelease(["C5", "E5", "G5", "C6"], "1n");
 }
 
@@ -196,6 +194,16 @@ function startFallingSequence() {
     let currentPitch = lastJumpPitch;
     let currentGap = 0.15;
     let currentVol = -5;
+    
+    // ★ 掉落聲也跟著變身 ★
+    if (squid && squid.isGolden) {
+        fallSynth.oscillator.type = "square";
+        fallSynth.volume.value = -10;
+    } else {
+        fallSynth.oscillator.type = "sine";
+        fallSynth.volume.value = -5;
+    }
+
     function playBeat() {
         if (!isFallingSoundPlaying) return;
         let now = Tone.now();
@@ -213,7 +221,7 @@ function stopFallingSequence() {
 }
 
 // ==========================================
-//  PART 2: 遊戲邏輯 (隨機性與重啟修正)
+//  PART 2: 遊戲邏輯 (UI 修正 & 無限愛心)
 // ==========================================
 let squid;
 let particles = [];
@@ -249,9 +257,7 @@ function startGame() {
     comboCount = 0;
     comboTimer = 0;
     squid.reset(width * 0.25, height/2);
-    
-    // ★ 關鍵修正：每次開始都生成隨機地形 ★
-    terrain.reset(true); // 傳入 true 代表要隨機化
+    terrain.reset(true);
     
     pearls = [];
     particles = [];
@@ -260,15 +266,36 @@ function startGame() {
     loop();
 }
 
+// ★ 愛心進化顯示系統 ★
 function updateHPDisplay() {
-    let hearts = "";
-    if (squid.hp > 0) {
-        for(let i=0; i<squid.hp; i++) hearts += "❤";
-        if (squid.hp > 5) hearts += " (MAX)";
-    } else {
-        hearts = "☠";
+    let hp = squid.hp;
+    let hpElement = document.getElementById('hp-bar');
+    let heartSymbol = "❤";
+    let color = "#ff5555"; // 預設紅
+    
+    // 根據血量改變顏色與符號
+    if (hp > 20) {
+        heartSymbol = "👑"; // 20+ 皇冠
+        color = "#ffd700"; // 金
+    } else if (hp > 10) {
+        heartSymbol = "💛"; // 10+ 黃金心
+        color = "#ffff00";
+    } else if (hp > 5) {
+        heartSymbol = "💙"; // 5+ 藍鑽心
+        color = "#00ffff";
     }
-    document.getElementById('hp-bar').innerText = hearts;
+
+    // 顯示邏輯：太多顆就用數字顯示，不然會超出螢幕
+    if (hp > 15) {
+        hpElement.innerText = heartSymbol + " x" + hp;
+    } else {
+        let str = "";
+        for(let i=0; i<hp; i++) str += heartSymbol;
+        hpElement.innerText = str;
+    }
+    
+    hpElement.style.color = color;
+    hpElement.style.textShadow = `0 0 5px ${color}`;
 }
 
 function showComboText(x, y, count) {
@@ -303,14 +330,6 @@ function draw() {
     if (gameState === 1) {
         gameSpeed += 0.0002;
         
-        if (comboCount > 0) {
-            comboTimer--;
-            let barWidth = map(comboTimer, 0, COMBO_TIME_LIMIT, 0, 200);
-            noStroke(); fill(255, 255, 0, 150);
-            rect(width/2 - 100, 60, barWidth, 5, 2);
-            if (comboTimer <= 0) comboCount = 0;
-        }
-        
         terrain.update();
         terrain.display();
 
@@ -330,7 +349,7 @@ function draw() {
                 if (comboCount >= 10) {
                     playJackpotSound();
                     score += 1000;
-                    if (squid.hp < 5) squid.hp++;
+                    squid.hp++; // ★ 無限加血 ★
                     updateHPDisplay();
                     squid.activateGoldenMode();
                     showJackpotText();
@@ -375,6 +394,16 @@ function draw() {
                 if (squid.hp <= 0) gameOver();
             }
         }
+        
+        // ★ UI 繪製修正：移到最後面，確保不被擋住 ★
+        if (comboCount > 0) {
+            comboTimer--;
+            let barWidth = map(comboTimer, 0, COMBO_TIME_LIMIT, 0, 200);
+            noStroke(); fill(255, 255, 0, 150);
+            // 畫在畫面頂端，確保明顯
+            rect(width/2 - 100, 80, barWidth, 10, 5);
+            if (comboTimer <= 0) comboCount = 0;
+        }
 
         document.getElementById('score-val').innerText = score;
 
@@ -388,10 +417,7 @@ function draw() {
         
         if (canRestart) {
             textSize(30); fill(255);
-            // 加上閃爍效果提示
-            if (frameCount % 60 < 40) {
-                text("點擊畫面 重新冒險", width/2, height/2 + 60);
-            }
+            if (frameCount % 60 < 40) text("點擊畫面 重新冒險", width/2, height/2 + 60);
         }
     }
     
@@ -429,7 +455,7 @@ function handleInput(e) {
         squid.jump(power);
         playJumpSound(power);
     } else if (gameState === 2 && canRestart) {
-        startGame(); // 這裡會呼叫地形隨機重置
+        startGame();
     }
     return false;
 }
@@ -456,16 +482,11 @@ function drawBackground() {
 // ==========================================
 class CaveTerrain {
     constructor() {
-        this.reset(true); // 預設隨機
+        this.reset(true);
     }
-    
     reset(randomize = false) {
-        if(randomize) {
-            // ★ 關鍵：隨機改變 Noise 的起始點，讓地形每次都不一樣 ★
-            this.noiseOffset = random(10000);
-        } else {
-            this.noiseOffset = 0;
-        }
+        if(randomize) this.noiseOffset = random(10000);
+        else this.noiseOffset = 0;
         
         this.segments = [];
         for(let x=0; x<=width; x+=10) this.segments.push(this.generateHeight(x));
@@ -572,6 +593,7 @@ class TechSquid {
     display() {
         push(); translate(this.pos.x, this.pos.y);
         if (this.hp <= 0) rotate(frameCount * 0.1); else rotate(this.vel.y * 0.02);
+        
         noFill(); strokeWeight(4);
         for(let i=-2; i<=2; i++) {
             stroke(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 200);
