@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Deep Sea Audio</title>
+  <title>Cyber Squid - Deep Tuning</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -100,17 +100,17 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">深海慵懶音效版</p>
+    <p style="color: #0aa; font-size: 20px;">深海調校版</p>
     <button id="start-btn">開始冒險</button>
     <p id="status-msg">請點擊按鈕以啟動音效</p>
   </div>
 
 <script>
 // ==========================================
-//  PART 1: 聲音系統 (深海低頻優化)
+//  PART 1: 聲音系統 (低頻氣泡 & 珍珠防爆)
 // ==========================================
-let jumpSynth, fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, dieSynth;
-let bubbleSynth, pearlSynth, ambientNoise, ambientFilter;
+let jumpSynth, fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, victorySynth, dieSynth;
+let bubbleSynth, pearlSynth, ambientNoise;
 let isAudioReady = false;
 let audioInitStarted = false;
 let lastJumpPitch = 600;
@@ -131,42 +131,43 @@ async function initAudio() {
         if (Tone.context.state !== 'running') await Tone.context.resume();
         Tone.Destination.volume.value = 0;
 
-        // 1. Jump
         jumpSynth = new Tone.Synth({
             oscillator: { type: "sine" },
             envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 }
         }).toDestination();
         jumpSynth.volume.value = -2;
 
-        // 2. Fall
         fallSynth = new Tone.Synth({
             oscillator: { type: "sine" },
             envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
         }).toDestination();
         fallSynth.volume.value = -5;
 
-        // 3. Collect (珍珠) - 保持清脆，但不需要太高頻
+        // ★ 珍珠音效：降音量防爆音 ★
         pearlSynth = new Tone.MembraneSynth({
             pitchDecay: 0.05, octaves: 4, oscillator: { type: "sine" },
             envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.1 }
         }).toDestination();
-        pearlSynth.volume.value = -2;
+        pearlSynth.volume.value = -10; // 降到 -10dB，避免連擊時刺耳
         
-        // 4. Level Up
         levelUpSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "sawtooth" },
             envelope: { attack: 0.05, decay: 0.5, sustain: 0.3, release: 1.5 }
         }).toDestination();
         levelUpSynth.volume.value = -8;
 
-        // 5. Jackpot
         jackpotSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: "triangle" },
             envelope: { attack: 0.1, decay: 0.5, sustain: 0.3, release: 1.0 }
         }).toDestination();
         jackpotSynth.volume.value = -12;
 
-        // 6. Collision
+        victorySynth = new Tone.PolySynth(Tone.Synth, {
+            oscillator: { type: "fatsawtooth", count: 3, spread: 30 },
+            envelope: { attack: 0.05, decay: 0.5, sustain: 1.0, release: 3.0 }
+        }).toDestination();
+        victorySynth.volume.value = -9;
+
         collisionSynth = new Tone.FMSynth({
             harmonicity: 3.0, modulationIndex: 10, oscillator: { type: "sine" }, modulation: { type: "square" },
             envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 },
@@ -174,38 +175,35 @@ async function initAudio() {
         }).toDestination();
         collisionSynth.volume.value = -2;
         
-        // 7. Death
         dieSynth = new Tone.NoiseSynth({
             noise: { type: "brown" }, envelope: { attack: 0.01, decay: 0.5, sustain: 0 }
         }).toDestination();
         dieSynth.volume.value = -2;
 
-        // 8. ★ 環境氣泡聲 (任賢齊 Style) ★
-        // 調整參數：更低的音高，更圓潤的包絡線，模擬真實水泡
-        bubbleSynth = new Tone.MembraneSynth({
-            pitchDecay: 0.1,    // 音高下滑慢一點，比較像大氣泡
-            octaves: 3,         // 變頻範圍適中
-            oscillator: { type: "sine" },
-            envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 } // 尾音稍微長一點點
+        // ★ 氣泡音效：低頻 + 高 Q 值濾波 (Bouncing Ball Style) ★
+        // 建立一個低通濾波器，加上 Resonance (Q)
+        const bubbleFilter = new Tone.Filter({
+            type: "lowpass",
+            frequency: 300,
+            Q: 8 // 高 Q 值，製造 "Womp" 的水聲感
         }).toDestination();
-        bubbleSynth.volume.value = -8; // 背景音量
 
-        // 9. ★ 深海低鳴 (Ambient Drone + Tide) ★
-        // 使用 AutoFilter 創造「洋流」的流動感
-        // Filter: 100Hz ~ 300Hz 之間緩慢掃動
-        let autoFilter = new Tone.AutoFilter({
-            frequency: "0.1n", // 極慢速流動 (約10秒一次循環)
-            baseFrequency: 150,
-            octaves: 1.5,
-            filter: { type: "lowpass", rolloff: -24, Q: 1 }
-        }).toDestination().start();
-        
-        ambientNoise = new Tone.Noise("brown").connect(autoFilter);
-        ambientNoise.volume.value = -18; // 深沉的背景底噪
+        bubbleSynth = new Tone.MembraneSynth({
+            pitchDecay: 0.1,    // 音高下降速度
+            octaves: 4,         // 變音範圍
+            oscillator: { type: "sine" },
+            envelope: { attack: 0.001, decay: 0.4, sustain: 0, release: 0.5 }
+        }).connect(bubbleFilter);
+        bubbleSynth.volume.value = -5;
+
+        // ★ 深海背景音：大幅降低音量 ★
+        let filter = new Tone.Filter(150, "lowpass").toDestination();
+        ambientNoise = new Tone.Noise("brown").connect(filter);
+        ambientNoise.volume.value = -32; // 降到 -32dB，僅作為極細微的襯底
         ambientNoise.start();
 
         const testBeep = new Tone.Synth().toDestination();
-        testBeep.triggerAttackRelease("C5", "32n");
+        testBeep.triggerAttackRelease("C6", "32n");
 
         isAudioReady = true;
         document.getElementById('overlay').style.display = 'none';
@@ -249,15 +247,13 @@ function playCollectSound(comboIndex) {
     try { pearlSynth.triggerAttackRelease(note, "32n"); } catch(e){}
 }
 
-// ★ 隨機播放擬真氣泡聲 ★
+// ★ 播放深海氣泡 (低頻) ★
 function playRandomBubble() {
     if (!isAudioReady) return;
-    // 使用低音音符模擬大氣泡：C2, E2, G2
-    let notes = ["C2", "E2", "G2", "B1"];
+    // 使用極低音符 C1, D1 來驅動 MembraneSynth
+    let notes = ["C1", "D1", "F1"];
     let note = random(notes);
-    // 隨機一點點音量變化
-    let vel = random(0.5, 1.0);
-    try { bubbleSynth.triggerAttackRelease(note, "16n", undefined, vel); } catch(e){}
+    try { bubbleSynth.triggerAttackRelease(note, "8n"); } catch(e){}
 }
 
 function playLevelUpSound() {
@@ -311,7 +307,7 @@ function stopFallingSequence() {
 }
 
 // ==========================================
-//  PART 2: 遊戲邏輯
+//  PART 2: 遊戲邏輯 (包含安全起步)
 // ==========================================
 let squid;
 let particles = []; let stars = []; let terrain; let pearls = [];
@@ -418,7 +414,6 @@ function draw() {
     } else if (gameState === 1) {
         gameSpeed += 0.0002;
         
-        // 氣泡聲頻率：約每 1.5 秒一次 (60fps * 0.015)
         if (random() < 0.015) playRandomBubble();
 
         let hasPearlOnScreen = pearls.some(p => p.pos.x > 0 && p.pos.x < width);
@@ -612,7 +607,7 @@ function drawBackground() {
 }
 
 // ==========================================
-//  PART 3: 類別
+//  PART 3: 類別 (含安全起步邏輯)
 // ==========================================
 
 class CaveObstacle {
@@ -667,13 +662,18 @@ class CaveTerrain {
     }
     addSegment(x) {
         let h = this.generateHeight(x); this.segments.push(h);
-        if (random() < 0.05) {
+        if (random() < 0.05 && x > 400) { // ★ 修正：前400像素不生成障礙物 ★
             let type = random() < 0.5 ? 'starfish' : 'eel'; let side = random() < 0.5 ? 'top' : 'bottom';
             let y = (side === 'top') ? h.top : h.bottom; let offset = (side === 'top') ? -10 : 10; if (type === 'eel') offset = 0;
             this.obstacles.push(new CaveObstacle(x, y + offset, type, side));
         }
     }
     generateHeight(x) {
+        // ★ 修正：前 400 像素強制為直線寬通道 ★
+        if (x < 400) {
+            return { x: x, top: height * 0.2, bottom: height * 0.8 }; // 中間非常寬敞
+        }
+        
         let n = noise(this.noiseOffset); this.noiseOffset += 0.02;
         let gapSize = map(n, 0, 1, 450, 650);
         let center = map(noise(this.noiseOffset * 0.5 + 100), 0, 1, 50, height-50);
