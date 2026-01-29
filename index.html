@@ -151,12 +151,21 @@ function mousePressed() {
 
 // 繪製深海背景
 function drawBackground() {
-  // 模擬新版的深藍色漸層背景
-  background(5, 15, 30);
-  noStroke();
-  // 底部稍微亮一點產生深度感
-  fill(10, 25, 50, 100);
-  rect(0, height/2, width, height/2);
+  // 取得 p5.js 背後的原生畫布 context，這是畫漸層最高效的方法
+  let ctx = drawingContext;
+
+  // 1. 設定漸層方向：從 (0, 0) 到 (0, height) 即「從上到下」
+  let gradient = ctx.createLinearGradient(0, 0, 0, height);
+
+  // 2. 設定顏色停損點 (Color Stops)
+  // 0.0 = 最頂端, 1.0 = 最底端
+  gradient.addColorStop(0, "#050f1e");   // 頂端：深藍色 (有點光透下來的感覺)
+  gradient.addColorStop(0.4, "#020810"); // 中間：漸漸變黑
+  gradient.addColorStop(1, "#000000");   // 底部：完全漆黑 (深海海溝)
+
+  // 3. 填滿整個畫面
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
 }
 
 
