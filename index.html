@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Derpy Eel</title>
+  <title>Cyber Squid - Crisp Audio</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -104,7 +104,7 @@
 
 <script>
 // ==========================================
-//  PART 1: 聲音系統 (爆音修正 & 穩定化)
+//  PART 1: 聲音系統 (完全修正版)
 // ==========================================
 let jumpSynth, fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, dieSynth;
 let isAudioReady = false;
@@ -121,42 +121,50 @@ const noteMap = [
 async function initAudio() {
     await Tone.start();
     
+    // 1. Jump
     jumpSynth = new Tone.Synth({
         oscillator: { type: "sine" },
         envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 }
     }).toDestination();
     jumpSynth.volume.value = -2;
 
+    // 2. Fall
     fallSynth = new Tone.Synth({
         oscillator: { type: "sine" },
         envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
     }).toDestination();
     fallSynth.volume.value = -5;
 
-    // ★ 修正：收集音效極短促化，解決忽大忽小 ★
+    // 3. ★ 收集音效 (最穩定設定) ★
+    // 使用最基本的 Synth，不做任何 Modulation，確保音量一致
     collectSynth = new Tone.PolySynth(Tone.Synth, {
         maxPolyphony: 32,
-        oscillator: { type: "triangle" },
-        // Sustain 0, Release 極短，確保每個音都是 "Ping" 一聲就結束
-        envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
+        oscillator: { type: "triangle" }, // 三角波，聲音乾淨有力
+        envelope: {
+            attack: 0.005, // 極快起音 (Clicky)
+            decay: 0.1,    // 快速衰減
+            sustain: 0,    // 無延音
+            release: 0.1   // 快速釋放，避免聲音重疊混濁
+        }
     }).toDestination();
-    collectSynth.volume.value = -4;
+    collectSynth.volume.value = -5; // 固定音量
     
-    // 升級音效
+    // 4. 升級音效
     levelUpSynth = new Tone.PolySynth(Tone.Synth, {
         oscillator: { type: "sawtooth" },
         envelope: { attack: 0.05, decay: 0.5, sustain: 0.3, release: 1.5 }
     }).toDestination();
     levelUpSynth.volume.value = -8;
 
-    // ★ 修正：Jackpot 音量大幅降低，Attack 拉長 ★
+    // 5. ★ Jackpot 音效 (縮短時值) ★
     jackpotSynth = new Tone.PolySynth(Tone.Synth, {
         oscillator: { type: "triangle" },
-        // Attack 2.0s 讓聲音緩慢升起，不爆音
-        envelope: { attack: 2.0, decay: 1.0, sustain: 0.5, release: 4.0 }
+        // Attack 0.05 (快), Release 1.5 (適中)，不再拖泥帶水
+        envelope: { attack: 0.05, decay: 0.3, sustain: 0.3, release: 1.5 }
     }).toDestination();
-    jackpotSynth.volume.value = -15; // 降到 -15dB 避免 Clip
+    jackpotSynth.volume.value = -12;
 
+    // 6. 碰撞
     collisionSynth = new Tone.FMSynth({
         harmonicity: 3.0, modulationIndex: 10, oscillator: { type: "sine" }, modulation: { type: "square" },
         envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 },
@@ -164,6 +172,7 @@ async function initAudio() {
     }).toDestination();
     collisionSynth.volume.value = -2;
     
+    // 7. 死亡
     dieSynth = new Tone.NoiseSynth({
         noise: { type: "brown" },
         envelope: { attack: 0.01, decay: 0.5, sustain: 0 }
@@ -198,7 +207,7 @@ function playCollectSound(comboIndex) {
     let index = (comboIndex % 10);
     let rootNote = noteMap[index];
     let harmNote = noteMap[(index + 2) % noteMap.length];
-    // velocity 固定為 1，確保音量一致
+    // velocity 強制設為 1，確保最大音量
     collectSynth.triggerAttackRelease([rootNote, harmNote], "16n", undefined, 1);
 }
 
@@ -209,8 +218,8 @@ function playLevelUpSound() {
 
 function playJackpotSound() {
     if (!isAudioReady) return;
-    // 減少同時播放的音符數量，避免爆音
-    jackpotSynth.triggerAttackRelease(["C4", "G4", "C5", "E5"], "1n");
+    // C Major 9，時間縮短為 2n (二分音符)
+    jackpotSynth.triggerAttackRelease(["C4", "G4", "C5", "E5"], "2n");
 }
 
 function playCollisionSound() {
@@ -293,7 +302,7 @@ function startGame() {
     gameSpeed = 3.5;
     comboCount = 0;
     comboTimer = 0;
-    squid.reset(width * 0.25, height/2); // 這裡會重置進化等級
+    squid.reset(width * 0.25, height/2);
     terrain.reset(true);
     
     pearls = [];
@@ -368,7 +377,7 @@ function draw() {
             // ★ UI修正：不在此繪製，移到最後 ★
             if (comboTimer <= 0) {
                 comboCount = 0;
-                // ★ 修正：斷連不退化！ (移除 squid.setEvolution(0)) ★
+                // 斷連不退化
             }
         }
         
@@ -444,7 +453,6 @@ function draw() {
             if (!squid.isInvincible) {
                 squid.takeDamage();
                 comboCount = 0;
-                // ★ 修正：受傷不退化！ (移除 squid.setEvolution(0)) ★
                 shakeAmount = 15;
                 playCollisionSound();
                 updateHPDisplay();
@@ -487,7 +495,7 @@ function draw() {
         if (stars[i].finished()) stars.splice(i, 1);
     }
     
-    // ★ UI 修正：確保 Combo 條繪製在所有物體(包含山壁)的最上層 ★
+    // UI 繪製
     if (gameState === 1 && comboCount > 0) {
         let barWidth = map(comboTimer, 0, COMBO_TIME_LIMIT, 0, 200);
         let hasPearlOnScreen = pearls.some(p => p.pos.x > 0 && p.pos.x < width);
@@ -548,10 +556,9 @@ function drawBackground() {
 }
 
 // ==========================================
-//  PART 3: 類別 (造型優化)
+//  PART 3: 類別 (呆萌花園鰻)
 // ==========================================
 
-// ★ 花園鰻 (Garden Eel) - 呆萌造型 ★
 class CaveObstacle {
     constructor(x, y, type, side) {
         this.pos = createVector(x, y);
@@ -560,9 +567,11 @@ class CaveObstacle {
         this.size = 40;
         this.angle = random(TWO_PI);
         this.timer = random(100);
-        // 隨機眼睛大小，製造呆萌感
+        // ★ 呆萌眼睛設定 ★
         this.leftEyeSize = random(3, 5);
         this.rightEyeSize = random(3, 5);
+        this.pupilOffsetLeft = createVector(random(-1, 1), random(-1, 1));
+        this.pupilOffsetRight = createVector(random(-1, 1), random(-1, 1));
     }
     update() {
         this.pos.x -= gameSpeed;
@@ -592,7 +601,7 @@ class CaveObstacle {
             
             noFill();
             stroke(240); // 白色
-            strokeWeight(14); // 稍微加粗
+            strokeWeight(14);
             beginShape();
             vertex(0, 0);
             bezierVertex(0, 20*dir, sway, 40*dir, sway*0.5, 70*dir);
@@ -609,10 +618,15 @@ class CaveObstacle {
             let headY = 70*dir;
             ellipse(headX, headY, 20, 24);
             
-            // 呆萌眼睛 (大小眼 + 鬥雞眼)
+            // 眼白
+            fill(255);
+            ellipse(headX - 5, headY - 2, this.leftEyeSize+2, this.leftEyeSize+2);
+            ellipse(headX + 5, headY + 2, this.rightEyeSize+2, this.rightEyeSize+2);
+            
+            // 眼珠 (鬥雞眼/亂看)
             fill(0);
-            ellipse(headX - 5, headY - 2, this.leftEyeSize, this.leftEyeSize);
-            ellipse(headX + 5, headY + 2, this.rightEyeSize, this.rightEyeSize);
+            ellipse(headX - 5 + this.pupilOffsetLeft.x, headY - 2 + this.pupilOffsetLeft.y, 2, 2);
+            ellipse(headX + 5 + this.pupilOffsetRight.x, headY + 2 + this.pupilOffsetRight.y, 2, 2);
         }
         pop();
     }
@@ -724,7 +738,6 @@ class TechSquid {
         this.evolutionLevel = 0;
     }
     setEvolution(level) {
-        // ★ 邏輯修正：只有等級變高時才更新 (單向進化) ★
         if (level > this.evolutionLevel) {
             this.evolutionLevel = level;
             this.size = 60 + (min(level, 5) * 5);
@@ -838,7 +851,7 @@ class TechSquid {
         bezierVertex(20, -35, 25, -10, 5, 10);
         bezierVertex(-25, 25, -25, 50, 15, 60);
         endShape();
-        strokeWeight(8); line(0, -30, -25, -25); // 長吻
+        strokeWeight(8); line(0, -30, -25, -25);
         noStroke(); fill(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 150);
         triangle(-10, 0, -25, 10, -10, 20);
         this.drawEyes(5, -25);
