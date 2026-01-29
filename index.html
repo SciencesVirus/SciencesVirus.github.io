@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Android BLE</title>
+  <title>Cyber Squid - MB02 Fix</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -84,26 +84,36 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">Android 藍牙體感版</p>
+    <p style="color: #0aa; font-size: 20px;">MB02 專用連線版</p>
     
     <div class="btn-group">
-        <button id="ble-btn">🔵 藍牙連線</button>
+        <button id="ble-btn">🔵 連接握力球</button>
         <button id="start-btn">開始冒險</button>
     </div>
     
     <div id="ble-status">
         <span id="p1-status" style="color: #888;">P1: 未連接</span>
-        <span id="data-debug" style="color: #555; font-size: 12px; margin-top:5px;">Waiting for signal...</span>
+        <span id="data-debug" style="color: #555; font-size: 12px; margin-top:5px;">Waiting...</span>
     </div>
   </div>
 
 <script>
 // ==========================================
-//  PART 0: Web Bluetooth 連接系統 (Android 適用)
+//  PART 0: MB02 專用 Web Bluetooth
 // ==========================================
 let bluetoothDevice;
 let gripCharacteristic;
 let lastDataValue = null;
+
+// ★ 關鍵：常用的低功耗藍牙服務 UUID 列表 ★
+// 這裡列出了市面上 90% 握力球可能使用的 UUID，確保瀏覽器允許連線
+const OPTIONAL_SERVICES = [
+    "0000fff0-0000-1000-8000-00805f9b34fb", // 通用 Generic
+    "0000ffe0-0000-1000-8000-00805f9b34fb", // HM-10 / CC2541
+    "0000fee7-0000-1000-8000-00805f9b34fb", // Tencent/WeChat
+    "6e400001-b5a3-f393-e0a9-e50e24dcca9e", // Nordic UART
+    "0000180d-0000-1000-8000-00805f9b34fb"  // Heart Rate (有些握力球會偽裝成心率帶)
+];
 
 // 檢查藍牙支援
 if (!navigator.bluetooth) {
@@ -115,60 +125,72 @@ async function connectBLE() {
     const debugMsg = document.getElementById('data-debug');
     
     try {
-        statusMsg.innerText = "掃描中...";
+        statusMsg.innerText = "請選擇 MB02...";
         
-        // 請求裝置：掃描所有常見握力球 UUID
+        // 1. 請求裝置 (只過濾 MB 開頭的裝置)
         const device = await navigator.bluetooth.requestDevice({
-            acceptAllDevices: true,
-            optionalServices: [
-                '0000fff0-0000-1000-8000-00805f9b34fb', // Generic
-                '0000180d-0000-1000-8000-00805f9b34fb', // Heart Rate
-                '0000ffe0-0000-1000-8000-00805f9b34fb', // HM-10
-                '6e400001-b5a3-f393-e0a9-e50e24dcca9e'  // Nordic UART
-            ]
+            filters: [{ namePrefix: "MB" }], // ★ 只抓 MB02, MBxx
+            optionalServices: OPTIONAL_SERVICES // ★ 必須列出所有可能的 UUID，否則會連接失敗
         });
 
-        statusMsg.innerText = "連接中...";
+        statusMsg.innerText = "連接 GATT Server...";
         const server = await device.gatt.connect();
         
-        // 自動尋找可用的 Service
+        statusMsg.innerText = "尋找服務...";
+        
+        // 2. 聰明搜尋：遍歷所有服務，找到第一個能 Notify 的特徵值
         const services = await server.getPrimaryServices();
-        let service = services[0];
-        
-        if (!service) throw new Error("找不到服務");
-        
-        // 自動尋找可用的 Characteristic (Notify)
-        const characteristics = await service.getCharacteristics();
         let targetChar = null;
-        for (let c of characteristics) {
-            if (c.properties.notify) {
-                targetChar = c;
-                break;
-            }
+
+        // 雙層迴圈找特徵值
+        for (const service of services) {
+            console.log("Checking Service:", service.uuid);
+            try {
+                const characteristics = await service.getCharacteristics();
+                for (const c of characteristics) {
+                    // 檢查是否有 notify 或 indicate 屬性
+                    if (c.properties.notify || c.properties.indicate) {
+                        console.log("Found Notify Char:", c.uuid);
+                        targetChar = c;
+                        break;
+                    }
+                }
+            } catch(e) { console.log("Skip service restricted"); }
+            if (targetChar) break;
         }
         
-        if (!targetChar) throw new Error("找不到通知特徵值");
+        if (!targetChar) throw new Error("找不到可讀取的數據特徵值 (No Notify)");
         
+        // 3. 訂閱
         await targetChar.startNotifications();
         targetChar.addEventListener('characteristicvaluechanged', handleBLEData);
         
+        // UI 更新
         statusMsg.innerText = `已連線: ${device.name}`;
         statusMsg.style.color = "#0f0";
+        debugMsg.innerText = "準備就緒，請握壓!";
         document.getElementById('ble-btn').innerText = "已連線";
         document.getElementById('ble-btn').disabled = true;
 
     } catch (error) {
         console.error("BLE Error:", error);
         statusMsg.innerText = "連線失敗";
+        statusMsg.style.color = "red";
         debugMsg.innerText = error.message;
+        // 如果是因為 UUID 不在列表，這裡會顯示錯誤
+        if(error.name === 'NotFoundError') {
+             debugMsg.innerText = "使用者取消或未選擇";
+        } else if (error.name === 'SecurityError') {
+             debugMsg.innerText = "安全性錯誤 (請確認 HTTPS)";
+        }
     }
 }
 
 function handleBLEData(event) {
     const value = event.target.value;
     
-    // 簡單解析：將整個 DataView 加總當作指紋
-    // 如果握力球傳送的數據發生變化 (握壓)，總和就會變
+    // 將 DataView 的所有 bytes 加總，當作一種簡單的 Hash
+    // 因為我們不知道具體哪個 byte 是步數，但只要總和變了，通常代表數值變了
     let currentSum = 0;
     for (let i = 0; i < value.byteLength; i++) {
         currentSum += value.getUint8(i);
@@ -178,6 +200,8 @@ function handleBLEData(event) {
     if (lastDataValue !== null && currentSum !== lastDataValue) {
         // 更新 Debug
         document.getElementById('data-debug').innerText = `Signal: ${currentSum}`;
+        document.getElementById('data-debug').style.color = "#fff";
+        setTimeout(() => document.getElementById('data-debug').style.color = "#555", 100);
         
         // 觸發跳躍 (僅在遊戲中)
         if (gameState === 1) {
@@ -291,7 +315,7 @@ async function initAudio() {
 
     } catch (e) {
         console.error("Audio Init Error:", e);
-        document.getElementById('p1-status').innerText = "音效啟動失敗";
+        document.getElementById('status-msg').innerText = "音效啟動失敗";
     }
 }
 
@@ -398,7 +422,7 @@ function setup() {
     terrain = new CaveTerrain();
     
     document.getElementById('start-btn').onclick = initAudio;
-    document.getElementById('ble-btn').onclick = connectBLE; // 綁定 BLE
+    document.getElementById('ble-btn').onclick = connectBLE;
     
     noLoop();
 }
