@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Puyo Combo</title>
+  <title>Cyber Squid - Crystal Sound</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -38,7 +38,6 @@
         display: none;
     }
 
-    /* 連擊顯示特效 */
     .combo-text {
         position: absolute;
         color: #ffff00;
@@ -46,12 +45,14 @@
         font-size: 24px;
         pointer-events: none;
         animation: floatUp 1s forwards;
-        text-shadow: 0 0 5px #ffaa00;
+        text-shadow: 0 0 10px #ffaa00;
+        z-index: 10;
     }
 
     @keyframes floatUp {
         0% { transform: translateY(0) scale(1); opacity: 1; }
-        100% { transform: translateY(-50px) scale(1.5); opacity: 0; }
+        50% { transform: translateY(-30px) scale(1.5); opacity: 1; }
+        100% { transform: translateY(-60px) scale(1); opacity: 0; }
     }
   </style>
 </head>
@@ -62,13 +63,13 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">魔法氣泡連鎖版</p>
+    <p style="color: #0aa; font-size: 20px;">水晶音效 • 連鎖優化版</p>
     <button id="start-btn">開始冒險</button>
   </div>
 
 <script>
 // ==========================================
-//  PART 1: 聲音系統 (Puyo 連鎖音效)
+//  PART 1: 聲音系統 (水晶音效 & 雙音和弦)
 // ==========================================
 let jumpSynth, fallSynth, collectSynth, collisionSynth;
 let isAudioReady = false;
@@ -76,17 +77,17 @@ let lastJumpPitch = 600;
 let fallTimeoutID = null;
 let isFallingSoundPlaying = false;
 
-// ★ 連鎖音階表 (C Major Pentatonic + High Octave) ★
-const comboScale = [
-    "C5", "D5", "E5", "G5", "A5", // 1-5 連鎖
-    "C6", "D6", "E6", "G6", "A6", // 6-10 連鎖 (高音)
-    "C7" // 超級連鎖
+// C Major 音階 (包含高八度)
+const noteMap = [
+    "C5", "D5", "E5", "G5", "A5",
+    "C6", "D6", "E6", "G6", "A6",
+    "C7", "E7", "G7"
 ];
 
 async function initAudio() {
     await Tone.start();
     
-    // 1. 跳躍
+    // 1. 跳躍 (維持溫柔 Sine)
     jumpSynth = new Tone.Synth({
         oscillator: { type: "sine" },
         envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 }
@@ -100,14 +101,18 @@ async function initAudio() {
     }).toDestination();
     fallSynth.volume.value = -5;
 
-    // 3. ★ 收集珍珠 (使用 Synth 讓音色更亮，類似 Puyo) ★
-    collectSynth = new Tone.PolySynth(Tone.Synth, {
-        oscillator: { type: "triangle" }, // 三角波比較有電玩感
-        envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.5 }
+    // 3. ★ 收集音效大改版：水晶風鈴 (AMSynth) ★
+    // 使用調幅合成器 (AMSynth) 創造金屬/鐘聲質感，非常清脆
+    collectSynth = new Tone.PolySynth(Tone.AMSynth, {
+        harmonicity: 2.5, // 泛音比率，造成金屬感
+        oscillator: { type: "square" }, // 方波讓聲音比較亮
+        envelope: { attack: 0.005, decay: 0.2, sustain: 0, release: 1.0 }, // 像敲鐘一樣有長尾韻
+        modulation: { type: "sine" },
+        modulationEnvelope: { attack: 0.005, decay: 0.3, sustain: 0, release: 0.5 }
     }).toDestination();
-    collectSynth.volume.value = -6;
+    collectSynth.volume.value = -4; // 稍微大聲一點點
 
-    // 4. 碰撞
+    // 4. 碰撞 (可愛 Boing)
     collisionSynth = new Tone.FMSynth({
         harmonicity: 3.0,
         modulationIndex: 10,
@@ -133,20 +138,24 @@ function playJumpSound(power) {
     jumpSynth.triggerAttackRelease(pitch, "8n");
 }
 
-// ★ Puyo 風格連鎖音效邏輯 ★
+// ★ 播放雙音和弦 ★
 function playCollectSound(comboIndex) {
     if (!isAudioReady) return;
     
-    // 確保不會超出音階陣列範圍 (如果連鎖超高，就固定在最高音)
-    let noteIndex = Math.min(comboIndex, comboScale.length - 1);
-    let note = comboScale[noteIndex];
+    // 找出主音
+    let index = Math.min(comboIndex, noteMap.length - 3); // 保留空間給和聲
+    let rootNote = noteMap[index];
+    
+    // 找出和聲 (大三度，也就是陣列中+2的位置，例如 C -> E)
+    let harmNote = noteMap[index + 2];
     
     if (comboIndex >= 8) {
-        // ★ 超級連鎖：播放和弦，獎勵感滿滿 ★
-        collectSynth.triggerAttackRelease([note, "E7", "G7"], "8n");
+        // 超級連鎖：大三和弦 (Root + 3rd + 5th)
+        let fifthNote = noteMap[index + 4] || "C8";
+        collectSynth.triggerAttackRelease([rootNote, harmNote, fifthNote], "8n");
     } else {
-        // 一般連鎖：單音爬升
-        collectSynth.triggerAttackRelease(note, "16n");
+        // 一般連鎖：雙音 (聽起來很像瑪利歐吃到金幣那種感覺，但更有音樂性)
+        collectSynth.triggerAttackRelease([rootNote, harmNote], "16n");
     }
 }
 
@@ -162,30 +171,24 @@ function startFallingSequence() {
     let currentPitch = lastJumpPitch;
     let currentGap = 0.15;
     let currentVol = -5;
-    
     function playBeat() {
         if (!isFallingSoundPlaying) return;
         let now = Tone.now();
         fallSynth.triggerAttackRelease(currentPitch, currentGap * 0.8, now, Tone.dbToGain(currentVol));
-        currentPitch *= 0.85;
-        currentGap *= 0.8;
-        currentVol -= 2;
+        currentPitch *= 0.85; currentGap *= 0.8; currentVol -= 2;
         if (currentPitch > 50 && currentGap > 0.02) {
             fallTimeoutID = setTimeout(playBeat, currentGap * 1000);
-        } else {
-            isFallingSoundPlaying = false;
-        }
+        } else { isFallingSoundPlaying = false; }
     }
     playBeat();
 }
-
 function stopFallingSequence() {
     isFallingSoundPlaying = false;
     if (fallTimeoutID) { clearTimeout(fallTimeoutID); fallTimeoutID = null; }
 }
 
 // ==========================================
-//  PART 2: 遊戲邏輯 (連鎖判定)
+//  PART 2: 遊戲邏輯 (Combo 優化)
 // ==========================================
 let squid;
 let particles = [];
@@ -197,10 +200,10 @@ let gameSpeed = 3;
 let shakeAmount = 0;
 let canRestart = false;
 
-// ★ 連鎖系統變數 ★
 let comboCount = 0;
 let comboTimer = 0;
-const COMBO_TIME_LIMIT = 120; // 約 2 秒沒吃到珍珠，連鎖就會斷掉
+// ★ 寬容度大增：300 frames (約 5 秒) ★
+const COMBO_TIME_LIMIT = 300;
 
 function setup() {
     createCanvas(windowWidth, windowHeight);
@@ -218,7 +221,8 @@ function startGame() {
     gameState = 1;
     score = 0;
     gameSpeed = 3.5;
-    comboCount = 0; // 重置連鎖
+    comboCount = 0;
+    comboTimer = 0;
     squid.reset(width * 0.25, height/2);
     terrain.reset();
     pearls = [];
@@ -228,26 +232,19 @@ function startGame() {
 
 function updateHPDisplay() {
     let hearts = "";
-    if (squid.hp > 0) {
-        for(let i=0; i<squid.hp; i++) hearts += "❤";
-    } else {
-        hearts = "☠";
-    }
+    if (squid.hp > 0) for(let i=0; i<squid.hp; i++) hearts += "❤";
+    else hearts = "☠";
     document.getElementById('hp-bar').innerText = hearts;
 }
 
-// 顯示連擊浮動文字
 function showComboText(x, y, count) {
     let el = document.createElement('div');
     el.className = 'combo-text';
     el.style.left = x + 'px';
     el.style.top = y + 'px';
     el.innerText = count > 1 ? "COMBO x" + count + "!" : "NICE!";
-    // 高連鎖變色
     if(count > 5) el.style.color = "#ff00ff";
-    
     document.body.appendChild(el);
-    // 動畫結束後移除
     setTimeout(() => { document.body.removeChild(el); }, 1000);
 }
 
@@ -264,11 +261,18 @@ function draw() {
     if (gameState === 1) {
         gameSpeed += 0.0002;
         
-        // ★ 連鎖計時器遞減 ★
+        // ★ Combo 計時邏輯 ★
         if (comboCount > 0) {
             comboTimer--;
+            
+            // 畫出 Combo 倒數計時條 (在畫面上方中間)
+            let barWidth = map(comboTimer, 0, COMBO_TIME_LIMIT, 0, 200);
+            noStroke();
+            fill(255, 255, 0, 150);
+            rect(width/2 - 100, 60, barWidth, 5, 2); // 黃色進度條
+            
             if (comboTimer <= 0) {
-                comboCount = 0; // 時間到，連鎖歸零
+                comboCount = 0; // 時間到，斷連
             }
         }
         
@@ -284,20 +288,14 @@ function draw() {
             p.display();
             
             if (p.hits(squid)) {
-                // ★ 吃到珍珠：增加連鎖 ★
                 comboCount++;
-                comboTimer = COMBO_TIME_LIMIT; // 重置計時器
+                comboTimer = COMBO_TIME_LIMIT; // ★ 吃到瞬間補滿時間 ★
                 
-                // 分數隨連鎖加倍
                 score += 100 + (comboCount * 50);
-                
-                // 播放對應音階
                 playCollectSound(comboCount - 1);
-                
-                // 顯示浮動文字
                 showComboText(screenPosition(p.pos.x), screenPosition(p.pos.y), comboCount);
                 
-                for(let k=0; k<8; k++) particles.push(new Bubble(p.pos.x, p.pos.y, true));
+                for(let k=0; k<12; k++) particles.push(new Bubble(p.pos.x, p.pos.y, true)); // 更多粒子
                 pearls.splice(i, 1);
             } else if (p.offscreen()) {
                 pearls.splice(i, 1);
@@ -313,7 +311,6 @@ function draw() {
 
         let collision = terrain.checkCollision(squid);
         if (collision.hit) {
-            // 修正位置
             if (collision.type === 'top') {
                 squid.pos.y = collision.limit + squid.size/2 + 2;
                 if (squid.vel.y < 0) squid.vel.y *= -0.5;
@@ -324,17 +321,12 @@ function draw() {
 
             if (!squid.isInvincible) {
                 squid.takeDamage();
-                
-                // ★ 撞到東西，連鎖斷掉！ ★
-                comboCount = 0;
-                
+                comboCount = 0; // 撞到牆，斷連
                 shakeAmount = 15;
                 playCollisionSound();
                 updateHPDisplay();
-                
                 if (collision.type === 'top') squid.vel.y = 8;
                 else if (collision.type === 'bottom') squid.vel.y = -12;
-                
                 if (squid.hp <= 0) gameOver();
             }
         }
@@ -361,15 +353,10 @@ function draw() {
         particles[i].display();
         if (particles[i].finished()) particles.splice(i, 1);
     }
-    
     pop();
 }
 
-// 輔助函式：將 Canvas 座標轉為螢幕絕對座標 (給 DOM 元素用)
-function screenPosition(x, y) {
-    // 這裡簡化處理，因為 canvas 也是全螢幕
-    return x;
-}
+function screenPosition(x, y) { return x; }
 
 function gameOver() {
     gameState = 2;
@@ -411,9 +398,8 @@ function drawBackground() {
 }
 
 // ==========================================
-//  PART 3: 類別 (不變)
+//  PART 3: 類別
 // ==========================================
-
 class CaveTerrain {
     constructor() { this.reset(); this.noiseOffset = 0; }
     reset() {
