@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Cave Dive</title>
+  <title>Cyber Squid - HP & Bounciness</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -20,37 +20,42 @@
     }
     
     button {
-      padding: 15px 40px; font-size: 20px; color: #0ff;
-      background: rgba(0, 255, 255, 0.1); border: 2px solid #0ff; border-radius: 5px;
+      padding: 20px 60px; font-size: 24px; color: #0ff;
+      background: rgba(0, 255, 255, 0.1); border: 3px solid #0ff; border-radius: 50px;
       cursor: pointer; margin-top: 30px; letter-spacing: 2px;
       box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
     }
     
     #hud {
       position: absolute; top: 20px; left: 20px; color: #0ff;
-      font-size: 18px; pointer-events: none; text-shadow: 0 0 5px #0ff;
-      display: none;
+      font-size: 24px; pointer-events: none; text-shadow: 0 0 5px #0ff;
+      display: none; font-weight: bold;
+    }
+    
+    /* 生命值顯示 */
+    #hp-bar {
+        position: absolute; top: 20px; right: 20px;
+        font-size: 30px; color: #ff5555; text-shadow: 0 0 5px #f00;
+        display: none;
     }
   </style>
 </head>
 <body>
 
-  <div id="hud">
-    SCORE: <span id="score-val">0</span> <br>
-    TIME: <span id="time-val">0</span>s
-  </div>
+  <div id="hud">SCORE: <span id="score-val">0</span></div>
+  <div id="hp-bar">❤❤❤</div>
 
   <div id="overlay">
-    <h1 style="text-shadow: 0 0 20px #0ff; font-size: 40px; margin-bottom: 0;">CYBER SQUID</h1>
-    <p style="color: #0aa; font-size: 14px;">CAVE EXPLORATION MODE</p>
-    <button id="start-btn">START DIVE</button>
+    <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
+    <p style="color: #0aa; font-size: 20px;">生命制 • 彈性碰撞版</p>
+    <button id="start-btn">開始遊戲</button>
   </div>
 
 <script>
 // ==========================================
-//  PART 1: 聲音系統 (新增寶物音效)
+//  PART 1: 聲音系統 (新增可愛碰撞聲)
 // ==========================================
-let jumpSynth, fallSynth, collectSynth, crashSynth;
+let jumpSynth, fallSynth, collectSynth, collisionSynth;
 let isAudioReady = false;
 let lastJumpPitch = 600;
 let fallTimeoutID = null;
@@ -59,36 +64,43 @@ let isFallingSoundPlaying = false;
 async function initAudio() {
     await Tone.start();
     
-    // 1. 跳躍 (動力) - Sine Wave
+    // 1. 跳躍 (Sine)
     jumpSynth = new Tone.Synth({
         oscillator: { type: "sine" },
         envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 }
     }).toDestination();
     jumpSynth.volume.value = -2;
 
-    // 2. 掉落 (彈跳感)
+    // 2. 掉落 (Sine)
     fallSynth = new Tone.Synth({
         oscillator: { type: "sine" },
         envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
     }).toDestination();
     fallSynth.volume.value = -5;
 
-    // 3. ★ 新增：吃到寶物 (清脆的高頻) ★
+    // 3. 收集 (Triangle Poly)
     collectSynth = new Tone.PolySynth(Tone.Synth, {
         oscillator: { type: "triangle" },
         envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 }
     }).toDestination();
     collectSynth.volume.value = -8;
 
-    // 4. ★ 新增：撞擊/死亡 (噪音) ★
-    crashSynth = new Tone.NoiseSynth({
-        noise: { type: "pink" },
-        envelope: { attack: 0.005, decay: 0.5, sustain: 0 }
+    // 4. ★ 新增：碰撞反彈聲 (FM Modulation) ★
+    // 使用 FM Synth 創造帶有金屬感/彈性的 "Boing" 聲
+    collisionSynth = new Tone.FMSynth({
+        harmonicity: 3.0, // 諧波比率，製造非整數倍泛音 (Ring Mod 聽感)
+        modulationIndex: 10, // 調變深度，讓聲音變厚
+        oscillator: { type: "sine" },
+        modulation: { type: "square" },
+        envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 },
+        modulationEnvelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 }
     }).toDestination();
+    collisionSynth.volume.value = -2;
 
     isAudioReady = true;
     document.getElementById('overlay').style.display = 'none';
     document.getElementById('hud').style.display = 'block';
+    document.getElementById('hp-bar').style.display = 'block';
     startGame();
 }
 
@@ -102,13 +114,15 @@ function playJumpSound(power) {
 
 function playCollectSound() {
     if (!isAudioReady) return;
-    // 隨機雙音，增加悅耳感
     collectSynth.triggerAttackRelease(["C6", "E6"], "16n");
 }
 
-function playCrashSound() {
+// ★ 播放可愛的碰撞聲 ★
+function playCollisionSound() {
     if (!isAudioReady) return;
-    crashSynth.triggerAttackRelease("8n");
+    // 快速滑音，製造 "Boing" 的感覺
+    collisionSynth.triggerAttackRelease("C3", "8n");
+    collisionSynth.frequency.rampTo("C2", 0.1); // 音高快速下降
 }
 
 function startFallingSequence() {
@@ -140,20 +154,22 @@ function stopFallingSequence() {
 }
 
 // ==========================================
-//  PART 2: 遊戲邏輯 (卷軸式)
+//  PART 2: 遊戲邏輯 (HP 與 反彈機制)
 // ==========================================
 let squid;
 let particles = [];
-let terrain; // 洞穴地形
-let pearls = []; // 寶物
+let terrain;
+let pearls = [];
 let gameState = 0;
 let score = 0;
-let survivalTime = 0;
-let gameSpeed = 5; // 卷動速度
+let gameSpeed = 3;
+
+// 畫面震動效果
+let shakeAmount = 0;
 
 function setup() {
     createCanvas(windowWidth, windowHeight);
-    squid = new TechSquid(width * 0.2, height/2); // 固定在左側 20% 處
+    squid = new TechSquid(width * 0.25, height/2);
     terrain = new CaveTerrain();
     
     document.getElementById('start-btn').addEventListener('click', initAudio);
@@ -163,28 +179,39 @@ function setup() {
 function startGame() {
     gameState = 1;
     score = 0;
-    survivalTime = 0;
-    gameSpeed = 5;
-    squid.reset(width * 0.2, height/2);
+    gameSpeed = 3.5;
+    squid.reset(width * 0.25, height/2);
     terrain.reset();
     pearls = [];
+    updateHPDisplay();
     loop();
 }
 
+function updateHPDisplay() {
+    let hearts = "";
+    for(let i=0; i<squid.hp; i++) hearts += "❤";
+    document.getElementById('hp-bar').innerText = hearts;
+}
+
 function draw() {
+    // 畫面震動處理
+    push();
+    if (shakeAmount > 0) {
+        translate(random(-shakeAmount, shakeAmount), random(-shakeAmount, shakeAmount));
+        shakeAmount *= 0.9; // 震動衰減
+        if(shakeAmount < 0.5) shakeAmount = 0;
+    }
+    
     drawBackground();
 
     if (gameState === 1) {
-        // --- 更新邏輯 ---
-        gameSpeed += 0.001; // 隨時間稍微變快
-        survivalTime += 0.016; // 約 60fps
+        gameSpeed += 0.0002;
         
-        // 1. 地形更新
         terrain.update();
         terrain.display();
 
-        // 2. 寶物生成與更新
-        if (frameCount % 60 === 0 && random() > 0.3) {
+        // 寶物生成
+        if (frameCount % 80 === 0 && random() > 0.2) {
             pearls.push(new Pearl(width, terrain.getCenterY(width)));
         }
         for (let i = pearls.length - 1; i >= 0; i--) {
@@ -192,60 +219,78 @@ function draw() {
             p.update();
             p.display();
             
-            // 吃到寶物
             if (p.hits(squid)) {
-                score += 50;
+                score += 100;
                 playCollectSound();
-                // 產生特效
-                for(let k=0; k<5; k++) particles.push(new Bubble(p.pos.x, p.pos.y, true));
+                for(let k=0; k<8; k++) particles.push(new Bubble(p.pos.x, p.pos.y, true));
                 pearls.splice(i, 1);
             } else if (p.offscreen()) {
                 pearls.splice(i, 1);
             }
         }
 
-        // 3. 章魚更新
+        // 章魚更新
         squid.update();
         squid.display();
         
-        // 掉落聲音偵測
         if (squid.vel.y > 2.5 && !isFallingSoundPlaying) {
             startFallingSequence();
         }
 
-        // 4. 碰撞判定 (Crash Logic)
-        // 撞到天花板或地板
-        if (terrain.checkCollision(squid)) {
-            gameOver();
+        // ★ 物理碰撞偵測 ★
+        let collision = terrain.checkCollision(squid);
+        if (collision.hit) {
+            if (!squid.isInvincible) {
+                // 真的撞到了，扣血
+                squid.takeDamage();
+                shakeAmount = 10; // 畫面震動
+                playCollisionSound(); // 播放可愛聲音
+                updateHPDisplay();
+                
+                // ★ 物理反彈機制：往反方向彈飛 ★
+                if (collision.type === 'top') {
+                    // 撞到天花板，用力往下推
+                    squid.vel.y = 8;
+                } else if (collision.type === 'bottom') {
+                    // 撞到地板，用力往上推 (稍微大一點，因為有重力)
+                    squid.vel.y = -12;
+                }
+                
+                if (squid.hp <= 0) {
+                    gameOver();
+                }
+            }
         }
 
-        // UI 更新
-        document.getElementById('score-val').innerText = floor(score + survivalTime * 10);
-        document.getElementById('time-val').innerText = floor(survivalTime);
+        document.getElementById('score-val').innerText = score;
 
     } else if (gameState === 2) {
-        // Game Over 畫面
         terrain.display();
         squid.display();
-        fill(255, 50, 50); textSize(50); textAlign(CENTER, CENTER);
-        text("HULL BREACH", width/2, height/2);
-        textSize(20); fill(255);
-        text("Tap to Restart Mission", width/2, height/2 + 60);
+        fill(255, 50, 50); textSize(60); textAlign(CENTER, CENTER);
+        text("任務失敗", width/2, height/2);
+        textSize(30); fill(255);
+        text("點擊畫面 再試一次", width/2, height/2 + 80);
     }
     
-    // 背景粒子 (永遠存在)
+    // 粒子系統
     if (random() > 0.8) particles.push(new Bubble(width, random(height), false));
     for (let i = particles.length - 1; i >= 0; i--) {
         particles[i].update();
         particles[i].display();
         if (particles[i].finished()) particles.splice(i, 1);
     }
+    
+    pop(); // 結束震動偏移
 }
 
 function gameOver() {
     gameState = 2;
     stopFallingSequence();
-    playCrashSound();
+    // 死亡時的聲音可以長一點
+    if(isAudioReady) {
+       collisionSynth.triggerAttackRelease("C1", "1n");
+    }
 }
 
 function mousePressed() {
@@ -263,13 +308,12 @@ function mousePressed() {
 
 function windowResized() {
     resizeCanvas(windowWidth, windowHeight);
-    squid.reset(width * 0.2, height/2);
+    squid.reset(width * 0.25, height/2);
 }
 
 function drawBackground() {
     let ctx = drawingContext;
     let gradient = ctx.createLinearGradient(0, 0, 0, height);
-    // 深海洞穴背景
     gradient.addColorStop(0, "#020510");
     gradient.addColorStop(1, "#000000");
     ctx.fillStyle = gradient;
@@ -277,7 +321,7 @@ function drawBackground() {
 }
 
 // ==========================================
-//  PART 3: 類別 (章魚, 寶物, 地形)
+//  PART 3: 類別
 // ==========================================
 
 class CaveTerrain {
@@ -288,140 +332,113 @@ class CaveTerrain {
     
     reset() {
         this.noiseOffset = 0;
-        this.segments = []; // 儲存地形高度的陣列
-        // 預先生成畫面寬度的地形
+        this.segments = [];
         for(let x=0; x<=width; x+=10) {
             this.segments.push(this.generateHeight(x));
         }
     }
     
     generateHeight(x) {
-        // 使用 Perlin Noise 生成洞穴
-        // top: 天花板高度 (0 ~ height/2)
-        // bottom: 地板高度 (height/2 ~ height)
         let n = noise(this.noiseOffset);
-        this.noiseOffset += 0.05; // 數字越小，洞穴越平滑
-        
-        let gapSize = map(n, 0, 1, 300, 500); // 洞穴開口大小
-        let center = map(noise(this.noiseOffset * 0.5 + 100), 0, 1, 100, height-100); // 洞穴中心點上下移動
-        
-        return {
-            x: x,
-            top: center - gapSize/2,
-            bottom: center + gapSize/2
-        };
+        this.noiseOffset += 0.02;
+        let gapSize = map(n, 0, 1, 450, 650);
+        let center = map(noise(this.noiseOffset * 0.5 + 100), 0, 1, 50, height-50);
+        return { x: x, top: center - gapSize/2, bottom: center + gapSize/2 };
     }
     
     update() {
-        // 移動地形 (往左卷動)
-        for (let s of this.segments) {
-            s.x -= gameSpeed;
-        }
-        
-        // 移除超出左邊的
-        if (this.segments[0].x < -10) {
-            this.segments.shift();
-        }
-        
-        // 在右邊新增
+        for (let s of this.segments) { s.x -= gameSpeed; }
+        if (this.segments[0].x < -10) { this.segments.shift(); }
         let lastX = this.segments[this.segments.length-1].x;
-        if (lastX < width) {
-            this.segments.push(this.generateHeight(lastX + 10));
-        }
+        if (lastX < width) { this.segments.push(this.generateHeight(lastX + 10)); }
     }
     
     display() {
-        fill(20, 30, 40); // 岩石顏色
-        stroke(0, 255, 255, 50); // 岩石邊緣微光
-        
-        // 畫天花板
-        beginShape();
-        vertex(0, 0);
+        fill(20, 30, 40); stroke(0, 255, 255, 50);
+        beginShape(); vertex(0, 0);
         for (let s of this.segments) vertex(s.x, s.top);
-        vertex(width, 0);
-        endShape(CLOSE);
-        
-        // 畫地板
-        beginShape();
-        vertex(0, height);
+        vertex(width, 0); endShape(CLOSE);
+        beginShape(); vertex(0, height);
         for (let s of this.segments) vertex(s.x, s.bottom);
-        vertex(width, height);
-        endShape(CLOSE);
+        vertex(width, height); endShape(CLOSE);
     }
     
-    // 取得某處的中心點 (給寶物生成用)
     getCenterY(atX) {
-        let n = noise(this.noiseOffset);
-        return map(noise(this.noiseOffset * 0.5 + 100), 0, 1, 100, height-100);
+        return map(noise(this.noiseOffset * 0.5 + 100), 0, 1, 50, height-50);
     }
     
-    // 碰撞偵測
+    // ★ 修改碰撞偵測：回傳方向 ★
     checkCollision(squid) {
-        // 找到章魚目前 X 位置對應的地形段落
-        // 這裡做簡單判定：找出離章魚最近的 segment
         for (let s of this.segments) {
             if (abs(s.x - squid.pos.x) < 10) {
-                // 判定：如果章魚碰到天花板或地板
-                // 縮小一點判定範圍 (Hitbox) 讓遊戲簡單一點點
-                let hitTop = (squid.pos.y - squid.size/2) < s.top + 10;
-                let hitBot = (squid.pos.y + squid.size/2) > s.bottom - 10;
-                if (hitTop || hitBot) return true;
+                // 縮小判定範圍
+                let safeZoneTop = s.top;
+                let safeZoneBot = s.bottom;
+                let squidTop = squid.pos.y - squid.size/2 + 10;
+                let squidBot = squid.pos.y + squid.size/2 - 10;
+                
+                if (squidTop < safeZoneTop) return { hit: true, type: 'top' };
+                if (squidBot > safeZoneBot) return { hit: true, type: 'bottom' };
             }
         }
-        return false;
+        return { hit: false, type: 'none' };
     }
 }
 
 class Pearl {
     constructor(x, y) {
         this.pos = createVector(x, y);
-        this.r = 15;
+        this.r = 20;
     }
-    update() {
-        this.pos.x -= gameSpeed;
-    }
+    update() { this.pos.x -= gameSpeed; }
     display() {
-        noStroke();
-        // 珍珠光暈
-        fill(255, 255, 200, 100);
-        ellipse(this.pos.x, this.pos.y, this.r * 2);
-        // 珍珠本體
-        fill(255);
-        ellipse(this.pos.x, this.pos.y, this.r);
+        noStroke(); fill(255, 255, 200, 100); ellipse(this.pos.x, this.pos.y, this.r * 2.5);
+        fill(255); ellipse(this.pos.x, this.pos.y, this.r);
     }
     hits(squid) {
         let d = dist(this.pos.x, this.pos.y, squid.pos.x, squid.pos.y);
-        return d < this.r + squid.size/2;
+        return d < this.r + squid.size;
     }
-    offscreen() {
-        return this.pos.x < -50;
-    }
+    offscreen() { return this.pos.x < -50; }
 }
 
 class TechSquid {
     constructor(x, y) {
         this.reset(x, y);
-        this.size = 50; // 稍微縮小一點以利鑽洞
+        this.size = 60;
         this.baseColor = color(0, 255, 255);
     }
     
     reset(x, y) {
         this.pos = createVector(x, y);
         this.vel = createVector(0, 0);
-        this.gravity = 0.4;
+        this.gravity = 0.35;
         this.drag = 0.95;
         this.bodyColor = this.baseColor;
         this.squish = 1.0;
         this.tentaclePhase = 0;
         this.eyeSize = 15;
+        
+        // ★ HP 與 無敵機制 ★
+        this.hp = 3;
+        this.invincibleTimer = 0;
+        this.isInvincible = false;
+    }
+    
+    takeDamage() {
+        this.hp--;
+        this.invincibleTimer = 90; // 無敵 90禎 (約1.5秒)
+        this.isInvincible = true;
+        // 受傷變紅色
+        this.bodyColor = color(255, 50, 50);
     }
     
     jump(power) {
-        this.vel.y = -8 - (power * 3);
+        this.vel.y = -9;
         this.squish = 0.6;
         this.bodyColor = color(255, 50, 255);
         this.eyeSize = 25;
-        for(let i=0; i<5; i++) particles.push(new Bubble(this.pos.x, this.pos.y + 20, true));
+        for(let i=0; i<5; i++) particles.push(new Bubble(this.pos.x, this.pos.y + 30, true));
     }
     
     update() {
@@ -429,44 +446,61 @@ class TechSquid {
         this.vel.mult(this.drag);
         this.pos.add(this.vel);
         
-        // 這裡不限制 pos.y，因為超出畫面撞牆交給 terrain 處理
-        
+        // 動畫
         this.squish = lerp(this.squish, 1.0 + sin(frameCount*0.1)*0.05, 0.1);
-        this.bodyColor = lerpColor(this.bodyColor, this.baseColor, 0.05);
+        
+        // ★ 顏色恢復邏輯 ★
+        if (this.isInvincible) {
+            this.invincibleTimer--;
+            // 閃爍效果
+            if (frameCount % 10 < 5) {
+                this.bodyColor = color(255, 100, 100, 150); // 半透明紅
+            } else {
+                this.bodyColor = this.baseColor;
+            }
+            
+            if (this.invincibleTimer <= 0) {
+                this.isInvincible = false;
+                this.bodyColor = this.baseColor;
+            }
+        } else {
+            this.bodyColor = lerpColor(this.bodyColor, this.baseColor, 0.05);
+        }
+        
         this.eyeSize = lerp(this.eyeSize, 15, 0.1);
-        this.tentaclePhase += 0.2; // 觸手動快一點
+        this.tentaclePhase += 0.1;
     }
     
     display() {
         push();
         translate(this.pos.x, this.pos.y);
-        // 根據速度旋轉，模擬前進感
-        let angle = map(this.vel.y, -10, 10, -PI/6, PI/6);
-        rotate(angle);
+        rotate(this.vel.y * 0.02);
         
-        // 觸手 (向後飄)
-        noFill(); strokeWeight(3);
+        noFill(); strokeWeight(4);
         for(let i=-2; i<=2; i++) {
             stroke(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 200);
             beginShape();
-            for(let j=0; j<8; j++) {
-                // 讓觸手水平向後飄
-                let wave = sin(this.tentaclePhase + i + j*0.5) * 5;
-                vertex(-15 - j*8, i*8 + wave);
+            for(let j=0; j<10; j++) {
+                let wave = sin(this.tentaclePhase + i + j*0.5) * j*1.5;
+                vertex(i*10 + wave, 30 + j*8);
             }
             endShape();
         }
         
-        // 身體 (橫向)
-        scale(this.squish, 1); // 橫向擠壓
+        scale(1, this.squish);
         noStroke(); fill(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 150);
-        ellipse(0, 0, this.size*1.5, this.size);
+        arc(0, 0, this.size*2, this.size*1.8, PI, TWO_PI);
+        rect(-this.size, 0, this.size*2, 10);
         
-        // 眼睛
-        fill(255);
-        ellipse(10, -5, this.eyeSize);
+        noFill(); stroke(this.bodyColor); strokeWeight(2);
+        arc(0, 0, this.size*1.8, this.size*1.6, PI, TWO_PI);
+        
+        let eyeY = -10;
+        fill(255); noStroke();
+        ellipse(-20, eyeY, this.eyeSize+5); ellipse(20, eyeY, this.eyeSize+5);
         fill(0);
-        ellipse(10 + 2, -5, 5);
+        ellipse(-20, eyeY + this.vel.y*0.2, 5);
+        ellipse(20, eyeY + this.vel.y*0.2, 5);
         
         pop();
     }
@@ -498,9 +532,7 @@ class Bubble {
         noStroke(); fill(200, 255, 255, this.alpha);
         ellipse(this.pos.x, this.pos.y, this.size);
     }
-    finished() {
-        return this.alpha < 0 || this.pos.x < 0;
-    }
+    finished() { return this.alpha < 0 || this.pos.x < 0; }
 }
 </script>
 </body>
