@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Android BLE Fix</title>
+  <title>Cyber Squid - BLE Debug</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -33,9 +33,11 @@
     button:disabled { border-color: #555; color: #555; cursor: not-allowed; }
 
     #ble-status {
-        margin-top: 20px; font-size: 14px; color: #888;
-        display: flex; align-items: center; gap: 10px; flex-direction: column;
-        background: rgba(0,0,0,0.5); padding: 10px; border-radius: 10px;
+        margin-top: 20px; font-size: 12px; color: #aaa;
+        display: flex; flex-direction: column; align-items: center; gap: 5px;
+        background: rgba(0,0,0,0.8); padding: 15px; border-radius: 10px;
+        width: 80%; max-width: 400px;
+        word-break: break-all; /* 讓長數據換行 */
     }
     
     #hud {
@@ -85,7 +87,7 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">Android 藍牙修復版</p>
+    <p style="color: #0aa; font-size: 20px;">數據偵錯版</p>
     
     <div class="btn-group">
         <button id="ble-btn">🔵 藍牙連線</button>
@@ -93,26 +95,25 @@
     </div>
     
     <div id="ble-status">
-        <span id="p1-status" style="color: #bbb;">提示：請先在系統設定「中斷」握力球連線</span>
-        <span id="data-debug" style="color: #555; font-size: 12px; margin-top:5px;">Waiting...</span>
+        <span id="p1-status" style="color: #bbb;">請先在手機設定斷開握力球</span>
+        <span id="data-raw" style="color: #ff0; font-family: monospace; font-size: 14px;">Raw: --</span>
+        <span id="data-debug" style="color: #555;">Waiting...</span>
     </div>
   </div>
 
 <script>
 // ==========================================
-//  PART 0: Web Bluetooth 連接系統 (Android 修正)
+//  PART 0: Web Bluetooth 數據偵錯系統
 // ==========================================
 let bluetoothDevice;
-let lastDataValue = null;
+let lastDataBuffer = null; // 用來比對數據是否變化
 
-// ★ 擴充的 UUID 列表 (增加連線成功率) ★
 const OPTIONAL_SERVICES = [
     "0000fff0-0000-1000-8000-00805f9b34fb", // Generic
     "0000ffe0-0000-1000-8000-00805f9b34fb", // HM-10
-    "0000fee7-0000-1000-8000-00805f9b34fb", // WeChat/Tuya
+    "0000fee7-0000-1000-8000-00805f9b34fb", // WeChat
     "0000180d-0000-1000-8000-00805f9b34fb", // Heart Rate
-    "0000180f-0000-1000-8000-00805f9b34fb", // Battery Service
-    "6e400001-b5a3-f393-e0a9-e50e24dcca9e"  // Nordic UART
+    "6e400001-b5a3-f393-e0a9-e50e24dcca9e"  // Nordic
 ];
 
 if (!navigator.bluetooth) {
@@ -127,103 +128,113 @@ async function connectBLE() {
         statusMsg.innerText = "掃描 MB02... (請選取)";
         statusMsg.style.color = "#0ff";
         
-        // 1. 請求裝置 (只過濾 MB 開頭，防止雜訊)
         const device = await navigator.bluetooth.requestDevice({
             filters: [{ namePrefix: "MB" }],
             optionalServices: OPTIONAL_SERVICES
         });
 
-        statusMsg.innerText = "連接中... (若卡住請重開藍牙)";
-        
-        // 監聽斷線
+        statusMsg.innerText = "連接中...";
         device.addEventListener('gattserverdisconnected', onDisconnected);
-
         const server = await device.gatt.connect();
         
-        statusMsg.innerText = "尋找服務...";
+        statusMsg.innerText = "正在尋找數據通道...";
         const services = await server.getPrimaryServices();
         
         let targetChar = null;
 
-        // 2. 暴力搜尋：遍歷所有服務，找第一個能 Notify 的特徵
-        // 這樣就不怕廠商亂改 UUID
+        // ★ 暴力偵測：訂閱所有可以 Notify 的特徵值 ★
+        // 這樣就不怕漏接
+        let foundAny = false;
+        
         for (const service of services) {
             try {
                 const characteristics = await service.getCharacteristics();
                 for (const c of characteristics) {
                     if (c.properties.notify || c.properties.indicate) {
-                        console.log("Found Notify Char:", c.uuid);
-                        targetChar = c;
-                        break;
+                        console.log("Subscribing to:", c.uuid);
+                        await c.startNotifications();
+                        c.addEventListener('characteristicvaluechanged', handleBLEData);
+                        foundAny = true;
                     }
                 }
-            } catch(e) { console.log("Skip restricted service"); }
-            if (targetChar) break;
+            } catch(e) { console.log("Service Access Denied"); }
         }
         
-        if (!targetChar) throw new Error("裝置未提供數據通知功能 (No Notify)");
-        
-        // 3. 啟動監聽
-        await targetChar.startNotifications();
-        targetChar.addEventListener('characteristicvaluechanged', handleBLEData);
+        if (!foundAny) throw new Error("找不到任何數據輸出 (No Notify)");
         
         statusMsg.innerText = `已連線: ${device.name}`;
         statusMsg.style.color = "#0f0";
-        debugMsg.innerText = "握壓即可跳躍";
+        debugMsg.innerText = "請用力握壓握力球！";
         document.getElementById('ble-btn').innerText = "已連線";
         document.getElementById('ble-btn').disabled = true;
         
-        // 連接成功也順便初始化音效 (Android 需要用戶手勢)
         if(!isAudioReady) initAudio();
 
     } catch (error) {
         console.error("BLE Error:", error);
         statusMsg.innerText = "連線失敗";
         statusMsg.style.color = "red";
-        
-        if (error.name === 'SecurityError') {
-            debugMsg.innerText = "安全性錯誤：請確保使用 HTTPS";
-        } else if (error.name === 'NetworkError') {
-            debugMsg.innerText = "無法連線：請確認手機已與裝置「取消配對」";
-        } else {
-            debugMsg.innerText = error.message;
-        }
+        debugMsg.innerText = error.message;
     }
 }
 
 function onDisconnected(event) {
-    const device = event.target;
     document.getElementById('p1-status').innerText = "裝置已斷線";
     document.getElementById('p1-status').style.color = "red";
     document.getElementById('ble-btn').disabled = false;
     document.getElementById('ble-btn').innerText = "重新連線";
 }
 
+// ★ 核心除錯：顯示原始 Hex 數據 ★
 function handleBLEData(event) {
-    const value = event.target.value;
+    const value = event.target.value; // DataView
+    const byteLength = value.byteLength;
     
-    // 計算數據特徵值
-    let currentSum = 0;
-    for (let i = 0; i < value.byteLength; i++) {
-        currentSum += value.getUint8(i);
+    // 轉成 Hex String 顯示 (例如: 01 0A FF)
+    let hexString = "";
+    let dataChanged = false;
+    
+    // 比較數據是否變化
+    if (!lastDataBuffer || lastDataBuffer.byteLength !== byteLength) {
+        dataChanged = true;
+        lastDataBuffer = new Uint8Array(byteLength);
     }
-    
-    // 若數據改變，觸發跳躍
-    if (lastDataValue !== null && currentSum !== lastDataValue) {
-        document.getElementById('data-debug').innerText = `Signal: ${currentSum}`;
-        // 閃爍 Debug 文字
-        const dbg = document.getElementById('data-debug');
-        dbg.style.color = "#fff";
-        setTimeout(() => dbg.style.color = "#555", 100);
 
-        if (gameState === 1) {
-            triggerPlayerAction();
+    for (let i = 0; i < byteLength; i++) {
+        let byte = value.getUint8(i);
+        // 轉 16 進位字串
+        let hex = byte.toString(16).toUpperCase();
+        if (hex.length < 2) hex = "0" + hex;
+        hexString += hex + " ";
+        
+        // 檢查內容是否改變
+        if (lastDataBuffer[i] !== byte) {
+            dataChanged = true;
+            lastDataBuffer[i] = byte;
         }
     }
-    lastDataValue = currentSum;
+    
+    // 更新 UI
+    const rawDisplay = document.getElementById('data-raw');
+    rawDisplay.innerText = `Raw: ${hexString}`;
+    
+    // 如果數據有變動，讓文字閃爍一下
+    if (dataChanged) {
+        rawDisplay.style.color = "#fff";
+        setTimeout(() => rawDisplay.style.color = "#ff0", 100);
+        
+        // ★ 只要數據有變動，就觸發跳躍 ★
+        // 這樣最靈敏，只要握力球送資料就跳
+        if (gameState === 1) {
+            triggerPlayerAction();
+        } else {
+            // 如果還沒開始遊戲，顯示 Debug 訊息
+            document.getElementById('data-debug').innerText = "收到訊號! (請按開始冒險)";
+            document.getElementById('data-debug').style.color = "#0f0";
+        }
+    }
 }
 
-// 統一觸發
 function triggerPlayerAction() {
     if (!squid) return;
     let power = random(0.6, 0.9);
@@ -232,9 +243,9 @@ function triggerPlayerAction() {
 }
 
 // ==========================================
-//  PART 1: 聲音系統 (修正倒數音效 + 方波珍珠)
+//  PART 1: 聲音系統
 // ==========================================
-let jumpSynth, fallSynth, collectSynth, levelUpSynth, jackpotSynth, victorySynth, dieSynth;
+let jumpSynth, fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, victorySynth, dieSynth;
 let ambientNoise;
 let pearlSynths = [];
 let pearlSynthIndex = 0;
@@ -265,11 +276,9 @@ async function initAudio() {
         fallSynth = new Tone.Synth({ oscillator: { type: "sine" }, envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 } }).toDestination();
         fallSynth.volume.value = -5;
 
-        // Collect (Square Pool)
         for(let i=0; i<15; i++) {
             let s = new Tone.Synth({ oscillator: { type: "square" }, envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 } }).toDestination();
-            s.volume.value = -12;
-            pearlSynths.push(s);
+            s.volume.value = -12; pearlSynths.push(s);
         }
         
         levelUpSynth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "sawtooth" }, envelope: { attack: 0.05, decay: 0.5, sustain: 0.3, release: 1.5 } }).toDestination();
@@ -289,12 +298,7 @@ async function initAudio() {
 
         let filter = new Tone.Filter(200, "lowpass").toDestination();
         ambientNoise = new Tone.Noise("brown").connect(filter);
-        ambientNoise.volume.value = -22;
-        ambientNoise.start();
-
-        // ★ 移除這裡的 C6 測試音，避免干擾倒數第一聲 ★
-        // const testBeep = new Tone.Synth().toDestination();
-        // testBeep.triggerAttackRelease("C6", "32n");
+        ambientNoise.volume.value = -22; ambientNoise.start();
 
         isAudioReady = true;
         document.getElementById('overlay').style.display = 'none';
@@ -302,10 +306,7 @@ async function initAudio() {
         document.getElementById('hp-bar').style.display = 'block';
         startCountdown();
 
-    } catch (e) {
-        console.error("Audio Init Error:", e);
-        document.getElementById('status-msg').innerText = "音效啟動失敗";
-    }
+    } catch (e) { console.error("Audio Init Error:", e); document.getElementById('status-msg').innerText = "音效啟動失敗"; }
 }
 
 function playJumpSound(power) {
@@ -329,11 +330,7 @@ function playCountdownBeep(pitch) {
 function playCollectSound(comboIndex) {
     if (!isAudioReady) return;
     let index = (comboIndex % 10);
-    let note = noteMap[index];
-    try {
-        pearlSynths[pearlSynthIndex].triggerAttackRelease(note, "32n");
-        pearlSynthIndex = (pearlSynthIndex + 1) % pearlSynths.length;
-    } catch(e){}
+    try { pearlSynths[pearlSynthIndex].triggerAttackRelease(noteMap[index], "32n"); pearlSynthIndex = (pearlSynthIndex + 1) % pearlSynths.length; } catch(e){}
 }
 
 function playLevelUpSound() { if (!isAudioReady) return; try { levelUpSynth.triggerAttackRelease(["C5", "E5", "G5", "C6"], "8n"); } catch(e){} }
@@ -367,26 +364,21 @@ function startFallingSequence() {
 function stopFallingSequence() { isFallingSoundPlaying = false; if (fallTimeoutID) { clearTimeout(fallTimeoutID); fallTimeoutID = null; } }
 
 // ==========================================
-//  PART 2: 遊戲邏輯 (累積計數)
+//  PART 2: 遊戲邏輯
 // ==========================================
 let squid;
 let particles = []; let stars = []; let terrain; let pearls = [];
 let gameState = 0; let score = 0; let gameSpeed = 3; let shakeAmount = 0; let canRestart = false;
-let comboCount = 0; let comboTimer = 0;
-let totalPearls = 0;
-const COMBO_TIME_LIMIT = 300;
-const VICTORY_PEARLS = 60;
-
+let comboCount = 0; let comboTimer = 0; let totalPearls = 0;
+const COMBO_TIME_LIMIT = 300; const VICTORY_PEARLS = 60;
 let startCountdownTimer = 0;
 
 function setup() {
     createCanvas(windowWidth, windowHeight);
     squid = new TechSquid(width * 0.25, height/2);
     terrain = new CaveTerrain();
-    
     document.getElementById('start-btn').onclick = initAudio;
     document.getElementById('ble-btn').onclick = connectBLE;
-    
     noLoop();
 }
 
@@ -398,23 +390,13 @@ function startCountdown() {
         squid.updateColorByLevel();
         squid.size = 60;
     }
-    terrain.reset(true);
-    pearls = []; particles = []; stars = [];
-    
-    score = 0;
-    comboCount = 0;
-    totalPearls = 0;
-    
-    gameState = 4; // Countdown
-    startCountdownTimer = 180;
-    updateHPDisplay();
-    loop();
+    terrain.reset(true); pearls = []; particles = []; stars = [];
+    score = 0; comboCount = 0; totalPearls = 0;
+    gameState = 4; startCountdownTimer = 180;
+    updateHPDisplay(); loop();
 }
 
-function startGame() {
-    gameState = 1; score = 0; gameSpeed = 3.5;
-    updateHPDisplay();
-}
+function startGame() { gameState = 1; score = 0; gameSpeed = 3.5; updateHPDisplay(); }
 
 function updateHPDisplay() {
     let hp = squid.hp;
@@ -466,45 +448,35 @@ function draw() {
     }
 
     if (gameState === 4) {
-        terrain.display();
-        squid.display();
+        terrain.display(); squid.display();
         startCountdownTimer--;
         let seconds = ceil(startCountdownTimer / 60);
-        // ★ 倒數音效修正：3,2,1 用 C5，GO 用 C6 ★
         if (startCountdownTimer % 60 === 0 && startCountdownTimer > 0) playCountdownBeep("C5");
         if (startCountdownTimer === 0) playCountdownBeep("C6");
-
         textAlign(CENTER, CENTER); textStyle(BOLD); textSize(150);
         if (startCountdownTimer > 0) { fill(255); text(seconds, width/2, height/2); }
         else { fill(0, 255, 255); text("GO!", width/2, height/2); }
-        
         if (startCountdownTimer < -30) startGame();
 
     } else if (gameState === 1) {
         gameSpeed += 0.0002;
-        
         let hasPearlOnScreen = pearls.some(p => p.pos.x > 0 && p.pos.x < width);
         if (comboCount > 0) {
             if (hasPearlOnScreen) comboTimer--;
             if (comboTimer <= 0) comboCount = 0;
         }
         
-        terrain.update();
-        terrain.display();
+        terrain.update(); terrain.display();
 
         if (frameCount % 80 === 0 && random() > 0.2) {
             pearls.push(new Pearl(width, terrain.getCenterY(width)));
         }
         for (let i = pearls.length - 1; i >= 0; i--) {
             let p = pearls[i];
-            p.update();
-            p.display();
+            p.update(); p.display();
             
             if (p.hits(squid)) {
-                comboCount++;
-                totalPearls++;
-                comboTimer = COMBO_TIME_LIMIT;
-                score += 100 + (comboCount * 50);
+                comboCount++; totalPearls++; comboTimer = COMBO_TIME_LIMIT; score += 100 + (comboCount * 50);
                 
                 let potentialLevel = floor(totalPearls / 10);
                 if (potentialLevel <= 5 && potentialLevel > squid.evolutionLevel) {
@@ -512,8 +484,7 @@ function draw() {
                     playLevelUpSound();
                     let names = ["", "透抽進化!", "水母進化!", "海馬進化!", "燈籠魚進化!", "黃金霸主!"];
                     showEvoText(names[potentialLevel]);
-                    squid.hp++;
-                    updateHPDisplay();
+                    squid.hp++; updateHPDisplay();
                     for(let k=0; k<20; k++) stars.push(new StarParticle(p.pos.x, p.pos.y));
                 }
                 
@@ -535,11 +506,9 @@ function draw() {
             }
         }
 
-        squid.update();
-        squid.display();
+        squid.update(); squid.display();
         
         if (squid.pos.x < -squid.size) { squid.hp = 0; triggerDeath(); }
-        
         if (squid.vel.y > 2.5 && !isFallingSoundPlaying) startFallingSequence();
 
         let collision = terrain.checkCollision(squid);
@@ -547,133 +516,87 @@ function draw() {
 
         if (collision.hit || obstacleHit) {
             if (collision.type === 'top') {
-                squid.pos.y = collision.limit + squid.size/2 + 2;
-                if (squid.vel.y < 0) squid.vel.y *= -0.5;
+                squid.pos.y = collision.limit + squid.size/2 + 2; if (squid.vel.y < 0) squid.vel.y *= -0.5;
             } else if (collision.type === 'bottom') {
-                squid.pos.y = collision.limit - squid.size/2 - 2;
-                if (squid.vel.y > 0) squid.vel.y *= -0.5;
+                squid.pos.y = collision.limit - squid.size/2 - 2; if (squid.vel.y > 0) squid.vel.y *= -0.5;
             } else if (obstacleHit) {
                 squid.vel.x = -8; squid.vel.y = random(-5, 5);
             }
 
             if (!squid.isInvincible) {
-                squid.takeDamage();
-                comboCount = 0;
-                shakeAmount = 15;
-                playCollisionSound();
-                updateHPDisplay();
-                if (collision.type === 'top') squid.vel.y = 8;
-                else if (collision.type === 'bottom') squid.vel.y = -12;
+                squid.takeDamage(); comboCount = 0; shakeAmount = 15;
+                playCollisionSound(); updateHPDisplay();
+                if (collision.type === 'top') squid.vel.y = 8; else if (collision.type === 'bottom') squid.vel.y = -12;
                 if (squid.hp <= 0) triggerDeath();
             }
         }
         document.getElementById('score-val').innerText = score;
 
     } else if (gameState === 2) {
-        terrain.display();
-        squid.updatePhysicsOnly();
-        squid.display();
-        
+        terrain.display(); squid.updatePhysicsOnly(); squid.display();
         if (squid.pos.y > height + 100) {
             fill(255, 50, 50); textSize(60); textAlign(CENTER, CENTER);
             text("GAME OVER", width/2, height/2 - 20);
             if (canRestart) {
                 textSize(30); fill(255);
                 let alpha = map(sin(frameCount * 0.1), -1, 1, 100, 255);
-                fill(255, 255, 255, alpha);
-                text("點擊畫面 重新開始", width/2, height/2 + 60);
+                fill(255, 255, 255, alpha); text("點擊畫面 重新開始", width/2, height/2 + 60);
             }
         }
     } else if (gameState === 3) {
         fill(0); textSize(60); textAlign(CENTER, CENTER);
-        text("VICTORY!", width/2, height/2 - 40);
-        text("完全制霸", width/2, height/2 + 40);
-        textSize(30);
-        if (frameCount % 60 < 30) text("點擊畫面 重新挑戰", width/2, height/2 + 120);
-        
+        text("VICTORY!", width/2, height/2 - 40); text("完全制霸", width/2, height/2 + 40);
+        textSize(30); if (frameCount % 60 < 30) text("點擊畫面 重新挑戰", width/2, height/2 + 120);
         if (random() > 0.5) stars.push(new StarParticle(random(width), random(height)));
-        for (let i = stars.length - 1; i >= 0; i--) {
-            stars[i].update(); stars[i].display();
-            if (stars[i].finished()) stars.splice(i, 1);
-        }
+        for (let i = stars.length - 1; i >= 0; i--) { stars[i].update(); stars[i].display(); if (stars[i].finished()) stars.splice(i, 1); }
     }
     
     if (gameState !== 3 && random() > 0.8) particles.push(new Bubble(width, random(height), false));
-    for (let i = particles.length - 1; i >= 0; i--) {
-        particles[i].update(); particles[i].display();
-        if (particles[i].finished()) particles.splice(i, 1);
-    }
-    if(gameState !== 3) {
-        for (let i = stars.length - 1; i >= 0; i--) {
-            stars[i].update(); stars[i].display();
-            if (stars[i].finished()) stars.splice(i, 1);
-        }
-    }
+    for (let i = particles.length - 1; i >= 0; i--) { particles[i].update(); particles[i].display(); if (particles[i].finished()) particles.splice(i, 1); }
+    if(gameState !== 3) { for (let i = stars.length - 1; i >= 0; i--) { stars[i].update(); stars[i].display(); if (stars[i].finished()) stars.splice(i, 1); } }
     
     if (gameState === 1 && comboCount > 0) {
         let barWidth = map(comboTimer, 0, COMBO_TIME_LIMIT, 0, 200);
         let hasPearlOnScreen = pearls.some(p => p.pos.x > 0 && p.pos.x < width);
         noStroke();
-        if (hasPearlOnScreen) fill(255, 255, 0, 200);
-        else fill(255, 255, 255, 100);
+        if (hasPearlOnScreen) fill(255, 255, 0, 200); else fill(255, 255, 255, 100);
         rect(width/2 - 100, 80, barWidth, 10, 5);
     }
-
     pop();
 }
 
 function screenPosition(x, y) { return x; }
 
 function triggerDeath() {
-    gameState = 2; stopFallingSequence(); playDieSound();
-    squid.explode();
-    for(let k=0; k<20; k++) {
-        let b = new Bubble(squid.pos.x, squid.pos.y, true);
-        b.vel = p5.Vector.random2D().mult(random(5, 10));
-        particles.push(b);
-    }
+    gameState = 2; stopFallingSequence(); playDieSound(); squid.explode();
+    for(let k=0; k<20; k++) { let b = new Bubble(squid.pos.x, squid.pos.y, true); b.vel = p5.Vector.random2D().mult(random(5, 10)); particles.push(b); }
     canRestart = false; setTimeout(() => { canRestart = true; }, 1500);
 }
 
 function triggerVictory() {
-    gameState = 3; stopFallingSequence();
-    playVictorySound();
+    gameState = 3; stopFallingSequence(); playVictorySound();
     canRestart = false; setTimeout(() => { canRestart = true; }, 4000);
 }
 
 function handleInput(e) {
     if(e && e.cancelable) e.preventDefault();
-    
-    if (gameState === 1) {
-        triggerPlayerAction();
-    } else if ((gameState === 2 || gameState === 3) && canRestart) {
-        squid.evolutionLevel = 0;
-        startCountdown();
-    }
+    if (gameState === 1) { triggerPlayerAction(); }
+    else if ((gameState === 2 || gameState === 3) && canRestart) { squid.evolutionLevel = 0; startCountdown(); }
     return false;
 }
 
 function mousePressed() { if (gameState !== 0) return handleInput(null); }
 function touchStarted() { if (gameState !== 0) return handleInput(null); }
-
-function windowResized() {
-    resizeCanvas(windowWidth, windowHeight);
-    if(squid) squid.pos.x = width * 0.25;
-}
-
+function windowResized() { resizeCanvas(windowWidth, windowHeight); if(squid) squid.pos.x = width * 0.25; }
 function drawBackground() {
-    let ctx = drawingContext;
-    let gradient = ctx.createLinearGradient(0, 0, 0, height);
-    gradient.addColorStop(0, "#020510");
-    gradient.addColorStop(1, "#000000");
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, width, height);
+    let ctx = drawingContext; let gradient = ctx.createLinearGradient(0, 0, 0, height);
+    gradient.addColorStop(0, "#020510"); gradient.addColorStop(1, "#000000");
+    ctx.fillStyle = gradient; ctx.fillRect(0, 0, width, height);
 }
 
 // ==========================================
-//  PART 3: 類別
+//  PART 3: 類別 (保持不變)
 // ==========================================
-
 class CaveObstacle {
     constructor(x, y, type, side) {
         this.pos = createVector(x, y); this.type = type; this.side = side; this.size = 40;
@@ -684,29 +607,21 @@ class CaveObstacle {
     }
     update() {
         this.pos.x -= gameSpeed; this.timer += 0.05;
-        if(frameCount % 20 === 0) {
-             this.pupilOffsetLeft = createVector(random(-1, 1), random(-1, 1));
-             this.pupilOffsetRight = createVector(random(-1, 1), random(-1, 1));
-        }
+        if(frameCount % 20 === 0) { this.pupilOffsetLeft = createVector(random(-1, 1), random(-1, 1)); this.pupilOffsetRight = createVector(random(-1, 1), random(-1, 1)); }
     }
     display() {
         push(); translate(this.pos.x, this.pos.y);
         if (this.type === 'starfish') {
             rotate(this.angle + this.timer * 0.5); noStroke(); fill(255, 100, 100);
-            beginShape(); for (let i = 0; i < 5; i++) {
-                let a = TWO_PI * i / 5 - HALF_PI; let r = this.size / 2;
-                vertex(cos(a) * r, sin(a) * r); a += TWO_PI / 10; vertex(cos(a) * r * 0.4, sin(a) * r * 0.4);
-            } endShape(CLOSE); fill(255, 200); ellipse(0, 0, 5, 5);
+            beginShape(); for (let i = 0; i < 5; i++) { let a = TWO_PI * i / 5 - HALF_PI; let r = this.size / 2; vertex(cos(a) * r, sin(a) * r); a += TWO_PI / 10; vertex(cos(a) * r * 0.4, sin(a) * r * 0.4); } endShape(CLOSE); fill(255, 200); ellipse(0, 0, 5, 5);
         } else if (this.type === 'eel') {
             let sway = sin(this.timer) * 15; let dir = (this.side === 'top') ? 1 : -1;
             noFill(); stroke(240); strokeWeight(14);
             beginShape(); vertex(0, 0); bezierVertex(0, 20*dir, sway, 40*dir, sway*0.5, 70*dir); endShape();
             noStroke(); fill(50); ellipse(0, 15*dir, 5, 5); ellipse(sway*0.3, 40*dir, 5, 5);
             fill(240); let headX = sway*0.5; let headY = 70*dir; ellipse(headX, headY, 20, 24);
-            fill(255); ellipse(headX - 5, headY - 2, this.leftEyeSize+2, this.leftEyeSize+2);
-            ellipse(headX + 5, headY + 2, this.rightEyeSize+2, this.rightEyeSize+2);
-            fill(0); ellipse(headX - 5 + this.pupilOffsetLeft.x, headY - 2 + this.pupilOffsetLeft.y, 2, 2);
-            ellipse(headX + 5 + this.pupilOffsetRight.x, headY + 2 + this.pupilOffsetRight.y, 2, 2);
+            fill(255); ellipse(headX - 5, headY - 2, this.leftEyeSize+2, this.leftEyeSize+2); ellipse(headX + 5, headY + 2, this.rightEyeSize+2, this.rightEyeSize+2);
+            fill(0); ellipse(headX - 5 + this.pupilOffsetLeft.x, headY - 2 + this.pupilOffsetLeft.y, 2, 2); ellipse(headX + 5 + this.pupilOffsetRight.x, headY + 2 + this.pupilOffsetRight.y, 2, 2);
         }
         pop();
     }
