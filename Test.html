@@ -154,13 +154,13 @@ window.addEventListener('load', checkSupport);
 
 // 統一入口點
 async function connectGrip() {
+    const isAndroid = /Android/i.test(navigator.userAgent);
     if (isAndroid) {
         await connectBLE();
     } else {
         await connectHID();
     }
 }
-
 // --- [PC 專用] WebHID 實作 ---
 async function connectHID() {
     try {
