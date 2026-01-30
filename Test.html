@@ -128,22 +128,29 @@ let p1LastTriggerTime = 0;
 let p2LastForce = 0;
 let p2LastTriggerTime = 0;
 
-// 偵測是否為 Android 環境
-const isAndroid = /Android/i.test(navigator.userAgent);
-
-// 初始化 UI 狀態
-window.onload = () => {
+function checkSupport() {
     const btn = document.getElementById('hid-btn');
     const status = document.getElementById('hid-status');
-    
+    const isAndroid = /Android/i.test(navigator.userAgent);
+
     if (isAndroid) {
-        status.innerText = "📱 Android 模式：請點擊連線藍牙";
-        btn.innerText = "🔵 連線 MB02 (BLE)";
-    } else if (!("hid" in navigator)) {
-        status.innerText = "⚠️ 瀏覽器不支援 WebHID，請使用 Chrome/Edge";
+        status.innerText = "📱 Android 模式：支援藍牙連線";
+        btn.innerText = "🔵 連線 MB02 (藍牙)";
+        btn.disabled = false;
+        // 覆蓋原本的 onclick，讓它去跑藍牙連線
+        btn.onclick = connectGrip; 
+    } else if ("hid" in navigator) {
+        status.innerText = "💻 PC 模式：支援 WebHID 連線";
+        btn.disabled = false;
+        btn.onclick = connectGrip;
+    } else {
+        status.innerText = "⚠️ 您的瀏覽器不支援 WebHID/藍牙 (請用 Chrome)";
         btn.disabled = true;
     }
-};
+}
+
+// 2. 確保網頁載入後自動執行檢查
+window.addEventListener('load', checkSupport);
 
 // 統一入口點
 async function connectGrip() {
