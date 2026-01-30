@@ -110,9 +110,12 @@
 // ==========================================
 //  PART 0: 雙模系統初始化 (WebHID / BLE 自動切換)
 // ==========================================
+// ==========================================
+//  PART 0: 雙模系統初始化 (WebHID / BLE 自動切換)
+// ==========================================
 const GRIP_VENDOR_ID = 0x08E2;
 const GRIP_PRODUCT_ID = 0x0101;
-// BLE 專用 UUID
+// BLE 專用 UUID (MB02 標準服務)
 const BLE_SERVICE_UUID = '0000ffe0-0000-1000-8000-00805f9b34fb'; 
 const BLE_CHAR_UUID    = '0000ffe1-0000-1000-8000-00805f9b34fb';
 
@@ -208,23 +211,29 @@ function updateStatusDisplay(id, text, color) {
 
 // 3. ★ 核心演算法：數據處理與揮拳判定 ★
 function handleSensorLogic(data, device) {
-    if (data.byteLength < 16) return;
+    // 檢查封包長度。BLE 傳輸有時封包較短，我們降低門檻
+    if (data.byteLength < 12) return;
 
-    // 偏移量修正：HID 通常從 4 開始，BLE 通常從 0 開始
-    // 如果 Android 沒反應，請將 offset 改為 0 測試
-    let offset = (device instanceof HIDDevice) ? 4 : 4; 
+    // ★ 關鍵修正：偏移量 (Offset) ★
+    // HIDDevice (PC) 會在 DataView 前端多一個 Report ID (1 byte)，故從 4 開始。
+    // BluetoothRemoteGATTCharacteristic (Android) 通常直接發送 Raw Data，從 0 開始。
+    let offset = (typeof HIDDevice !== 'undefined' && device instanceof HIDDevice) ? 4 : 0; 
     
-    const ax = data.getFloat32(offset, true);
-    const ay = data.getFloat32(offset + 4, true);
-    const az = data.getFloat32(offset + 8, true);
-    
-    const currentForce = Math.sqrt(ax*ax + ay*ay + az*az);
-    const now = Date.now();
+    try {
+        const ax = data.getFloat32(offset, true);
+        const ay = data.getFloat32(offset + 4, true);
+        const az = data.getFloat32(offset + 8, true);
+        
+        const currentForce = Math.sqrt(ax*ax + ay*ay + az*az);
+        const now = Date.now();
 
-    if (device === player1Device) {
-        processPunch(currentForce, now, 'p1');
-    } else if (device === player2Device) {
-        processPunch(currentForce, now, 'p2');
+        if (device === player1Device) {
+            processPunch(currentForce, now, 'p1');
+        } else if (device === player2Device) {
+            processPunch(currentForce, now, 'p2');
+        }
+    } catch (e) {
+        // 防止封包不完整導致當機
     }
 }
 
@@ -261,7 +270,7 @@ function triggerPlayerAction() {
     playJumpSound(power);
 }
 
-// 初始化
+// 啟動檢查
 checkSupport();
 // ==========================================
 //  PART 1: 聲音系統 (方波池 + 接龍 + 深海)
