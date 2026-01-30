@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Dual HID</title>
+  <title>Cyber Squid - High Sensitivity</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -32,11 +32,17 @@
     button:active { transform: scale(0.95); }
     button:disabled { border-color: #555; color: #555; cursor: not-allowed; }
 
-    #hid-status {
-        margin-top: 15px; font-size: 14px; color: #888;
-        display: flex; align-items: center; gap: 5px; flex-direction: column;
-        background: rgba(0,0,0,0.5); padding: 10px; border-radius: 10px;
-        min-width: 250px;
+    #ble-status {
+        margin-top: 20px; font-size: 14px; color: #888;
+        display: flex; align-items: center; gap: 10px; flex-direction: column;
+        background: rgba(0,0,0,0.6); padding: 15px; border-radius: 10px;
+    }
+
+    /* 極致敏感度測試燈 */
+    #signal-light {
+        width: 20px; height: 20px; border-radius: 50%;
+        background-color: #333; border: 2px solid #555;
+        margin-top: 10px; transition: background-color 0.05s;
     }
     
     #hud {
@@ -86,143 +92,144 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">雙人握力球版 (WebHID)</p>
+    <p style="color: #0aa; font-size: 20px;">極致敏感版</p>
     
     <div class="btn-group">
-        <button id="hid-btn">🔵 連接握力球</button>
+        <button id="ble-btn">🔵 連接 MB02</button>
         <button id="start-btn">開始冒險</button>
     </div>
     
-    <div id="hid-status">
-        <div id="p1-area" style="width: 100%; display: flex; justify-content: space-between;">
-            <span style="color: #888;">P1: 未連接</span>
-            <span id="p1-debug" style="color: #555; font-family: monospace;">Step: --</span>
+    <div id="ble-status">
+        <span id="p1-status" style="color: #bbb;">提示：請先在系統設定「中斷」握力球連線</span>
+        <div style="display:flex; align-items:center; gap:10px;">
+            <span>訊號燈:</span>
+            <div id="signal-light"></div>
         </div>
-        <div id="p2-area" style="width: 100%; display: flex; justify-content: space-between; border-top: 1px solid #333; padding-top: 5px;">
-            <span style="color: #888;">P2: 未連接</span>
-            <span id="p2-debug" style="color: #555; font-family: monospace;">Step: --</span>
-        </div>
+        <span id="data-debug" style="color: #555; font-size: 12px; margin-top:5px; font-family: monospace;">RAW: --</span>
     </div>
   </div>
 
 <script>
 // ==========================================
-//  PART 0: WebHID 雙球連接系統 (Dual Steps)
+//  PART 0: 藍牙極致敏感判定
 // ==========================================
-const GRIP_VENDOR_ID = 0x08E2;
-const GRIP_PRODUCT_ID = 0x0101;
+let bluetoothDevice;
+let lastDataHex = ""; // 改用 Hex 字串比對，最精準
 
-let player1Device = null;
-let player2Device = null;
+const OPTIONAL_SERVICES = [
+    "0000fff0-0000-1000-8000-00805f9b34fb",
+    "0000ffe0-0000-1000-8000-00805f9b34fb",
+    "0000fee7-0000-1000-8000-00805f9b34fb",
+    "0000180d-0000-1000-8000-00805f9b34fb",
+    "00001800-0000-1000-8000-00805f9b34fb",
+    "00001801-0000-1000-8000-00805f9b34fb",
+    "6e400001-b5a3-f393-e0a9-e50e24dcca9e",
+    "0000ae00-0000-1000-8000-00805f9b34fb"
+];
 
-// 分別記錄兩顆球的狀態，互不干擾
-let p1LastSteps = -1;
-let p2LastSteps = -1;
-
-// 檢查瀏覽器支援
-if (!("hid" in navigator)) {
-    document.querySelector('#hid-status span').innerText = "⚠️ 瀏覽器不支援 WebHID (請用 Chrome PC版)";
+if (!navigator.bluetooth) {
+    document.getElementById('p1-status').innerText = "您的瀏覽器不支援藍牙 (請用 Chrome)";
 }
 
-async function connectHID() {
+async function connectBLE() {
+    const statusMsg = document.getElementById('p1-status');
+    const debugMsg = document.getElementById('data-debug');
+    
     try {
-        // 請求裝置 (過濾特定的 VID/PID)
-        const devices = await navigator.hid.requestDevice({
-            filters: [{ vendorId: GRIP_VENDOR_ID, productId: GRIP_PRODUCT_ID }]
+        statusMsg.innerText = "掃描中...";
+        statusMsg.style.color = "#0ff";
+        
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [{ namePrefix: "MB" }],
+            optionalServices: OPTIONAL_SERVICES
         });
 
-        if (devices.length === 0) {
-            console.log("未選擇裝置");
-            return;
-        }
-
-        // 處理所有選取的裝置
-        for (let device of devices) {
-            await openDevice(device);
-        }
-
-    } catch (err) {
-        console.error("HID Error:", err);
-    }
-}
-
-async function openDevice(device) {
-    if (!device.opened) {
-        await device.open();
-    }
-    
-    // 綁定輸入監聽 (核心邏輯)
-    device.addEventListener("inputreport", handleInputReport);
-    
-    // 自動分配 P1 或 P2
-    if (!player1Device) {
-        player1Device = device;
-        updateStatusUI("p1", `P1: ${device.productName}`, "#0f0");
-        document.getElementById('hid-btn').innerText = "連接第二顆";
-    }
-    // 如果不是 P1 (避免重複)，且 P2 還沒連
-    else if (device !== player1Device && !player2Device) {
-        player2Device = device;
-        updateStatusUI("p2", `P2: ${device.productName}`, "#0f0");
-        document.getElementById('hid-btn').innerText = "裝置已滿";
-        document.getElementById('hid-btn').disabled = true;
-    }
-}
-
-function updateStatusUI(player, text, color) {
-    // 透過 selector 找到對應的 span
-    const area = document.getElementById(player + '-area');
-    const label = area.querySelector('span:first-child');
-    label.innerText = text;
-    label.style.color = color;
-}
-
-// ★ 核心：雙裝置解析 ★
-function handleInputReport(event) {
-    const { data, device } = event;
-    
-    // 確保資料長度足夠 (Steps 在 offset 28)
-    if (data.byteLength < 32) return;
-
-    // 讀取目前的步數
-    const currentSteps = data.getUint32(28, true);
-
-    // --- P1 邏輯 ---
-    if (device === player1Device) {
-        document.getElementById('p1-debug').innerText = `Step: ${currentSteps}`;
+        statusMsg.innerText = "正在連接...";
+        device.addEventListener('gattserverdisconnected', onDisconnected);
+        const server = await device.gatt.connect();
         
-        // 第一次連線不觸發
-        if (p1LastSteps !== -1 && currentSteps > p1LastSteps) {
-            if (gameState === 1) { // 遊戲中才跳
-                triggerPlayerAction();
-                highlightDebug("p1");
-            }
+        statusMsg.innerText = "全面掃描服務...";
+        const services = await server.getPrimaryServices();
+        
+        let targetChar = null;
+
+        for (const service of services) {
+            try {
+                const characteristics = await service.getCharacteristics();
+                for (const c of characteristics) {
+                    if (c.properties.notify || c.properties.indicate) {
+                        console.log("Found Target:", c.uuid);
+                        targetChar = c;
+                        break;
+                    }
+                }
+            } catch(e) { console.log("Access denied"); }
+            if (targetChar) break;
         }
-        p1LastSteps = currentSteps;
+        
+        if (!targetChar) throw new Error("找不到數據源 (No Notify)");
+        
+        await targetChar.startNotifications();
+        targetChar.addEventListener('characteristicvaluechanged', handleBLEData);
+        
+        statusMsg.innerText = `已連線: ${device.name}`;
+        statusMsg.style.color = "#0f0";
+        debugMsg.innerText = "請握壓測試訊號燈";
+        
+        document.getElementById('ble-btn').innerText = "已連線";
+        document.getElementById('ble-btn').disabled = true;
+        
+        if(!isAudioReady) initAudio(false);
+
+    } catch (error) {
+        console.error("BLE Error:", error);
+        statusMsg.innerText = "連線失敗";
+        statusMsg.style.color = "red";
+        debugMsg.innerText = "請確認手機已與裝置解除配對";
+    }
+}
+
+function onDisconnected() {
+    document.getElementById('p1-status').innerText = "裝置已斷線";
+    document.getElementById('p1-status').style.color = "red";
+    document.getElementById('ble-btn').disabled = false;
+    document.getElementById('ble-btn').innerText = "重新連線";
+}
+
+function handleBLEData(event) {
+    const value = event.target.value;
+    
+    // ★ 極致敏感算法：轉成 Hex 字串直接比對 ★
+    // 這樣只要有任何一個 bit 改變，都能抓到
+    let currentHex = "";
+    for (let i = 0; i < value.byteLength; i++) {
+        let byte = value.getUint8(i).toString(16).toUpperCase();
+        if (byte.length < 2) byte = "0" + byte;
+        currentHex += byte;
     }
     
-    // --- P2 邏輯 (完全複製 P1，但變數獨立) ---
-    else if (device === player2Device) {
-        document.getElementById('p2-debug').innerText = `Step: ${currentSteps}`;
-        
-        if (p2LastSteps !== -1 && currentSteps > p2LastSteps) {
-            if (gameState === 1) {
-                triggerPlayerAction();
-                highlightDebug("p2");
-            }
+    // 如果數據內容變了
+    if (currentHex !== lastDataHex) {
+        // 1. 亮燈回饋
+        const light = document.getElementById('signal-light');
+        light.style.backgroundColor = "#ff0000";
+        light.style.boxShadow = "0 0 10px #ff0000";
+        setTimeout(() => {
+            light.style.backgroundColor = "#333";
+            light.style.boxShadow = "none";
+        }, 50);
+
+        // 2. 更新 Debug 數值 (顯示前 6 個 Byte 就好，不然太長)
+        document.getElementById('data-debug').innerText = `RAW: ${currentHex.substring(0, 12)}...`;
+
+        // 3. 觸發遊戲
+        if (gameState === 1) {
+            triggerPlayerAction();
         }
-        p2LastSteps = currentSteps;
     }
+    lastDataHex = currentHex;
 }
 
-// 視覺回饋：讓數值閃一下白色
-function highlightDebug(player) {
-    const el = document.getElementById(player + '-debug');
-    el.style.color = "#fff";
-    setTimeout(() => el.style.color = "#555", 100);
-}
-
-// 統一觸發動作 (無論 P1 或 P2 握壓，都呼叫這個)
 function triggerPlayerAction() {
     if (!squid) return;
     let power = random(0.6, 0.9);
@@ -231,20 +238,28 @@ function triggerPlayerAction() {
 }
 
 // ==========================================
-//  PART 1: 聲音系統 (方波池 + 接龍 + 深海)
+//  PART 1: 聲音系統 (完全修正版)
 // ==========================================
 let jumpSynth, fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, victorySynth, dieSynth;
 let ambientNoise;
-let pearlSynths = []; let pearlSynthIndex = 0;
-let isAudioReady = false; let audioInitStarted = false;
-let lastJumpPitch = 600; let fallTimeoutID = null; let isFallingSoundPlaying = false;
+let pearlSynths = [];
+let pearlSynthIndex = 0;
+
+let isAudioReady = false;
+let audioInitStarted = false;
+let lastJumpPitch = 600;
+let fallTimeoutID = null;
+let isFallingSoundPlaying = false;
+
 const noteMap = ["C5", "D5", "E5", "G5", "A5", "C6", "D6", "E6", "G6", "A6", "C7", "E7", "G7"];
 
-async function initAudio() {
+async function initAudio(startNow = true) {
     if (audioInitStarted) return;
     audioInitStarted = true;
+    
     const btn = document.getElementById('start-btn');
     btn.innerText = "啟動中...";
+    
     try {
         await Tone.start();
         if (Tone.context.state !== 'running') await Tone.context.resume();
@@ -256,6 +271,7 @@ async function initAudio() {
         fallSynth = new Tone.Synth({ oscillator: { type: "sine" }, envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 } }).toDestination();
         fallSynth.volume.value = -5;
 
+        // Square Pool
         for(let i=0; i<15; i++) {
             let s = new Tone.Synth({ oscillator: { type: "square" }, envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 } }).toDestination();
             s.volume.value = -12; pearlSynths.push(s);
@@ -278,18 +294,26 @@ async function initAudio() {
 
         let filter = new Tone.Filter(200, "lowpass").toDestination();
         ambientNoise = new Tone.Noise("brown").connect(filter);
-        ambientNoise.volume.value = -22; ambientNoise.start();
+        ambientNoise.volume.value = -22;
+        ambientNoise.start();
 
-        const testBeep = new Tone.Synth().toDestination();
-        testBeep.triggerAttackRelease("C6", "32n");
+        // ★ 這裡完全乾淨，沒有任何測試嗶聲 ★
 
         isAudioReady = true;
-        document.getElementById('overlay').style.display = 'none';
-        document.getElementById('hud').style.display = 'block';
-        document.getElementById('hp-bar').style.display = 'block';
-        startCountdown();
+        
+        if (startNow) {
+            document.getElementById('overlay').style.display = 'none';
+            document.getElementById('hud').style.display = 'block';
+            document.getElementById('hp-bar').style.display = 'block';
+            startCountdown();
+        } else {
+             btn.innerText = "開始冒險";
+        }
 
-    } catch (e) { console.error("Audio Init Error:", e); document.getElementById('status-msg').innerText = "音效啟動失敗"; }
+    } catch (e) {
+        console.error("Audio Init Error:", e);
+        document.getElementById('status-msg').innerText = "音效啟動失敗";
+    }
 }
 
 function playJumpSound(power) {
@@ -304,7 +328,10 @@ function playJumpSound(power) {
 
 function playCountdownBeep(pitch) {
     if (!isAudioReady) return;
-    try { jumpSynth.oscillator.type = "sine"; jumpSynth.volume.value = -5; jumpSynth.triggerAttackRelease(pitch, "32n"); } catch(e){}
+    try {
+        jumpSynth.oscillator.type = "sine"; jumpSynth.volume.value = -5;
+        jumpSynth.triggerAttackRelease(pitch, "32n");
+    } catch(e){}
 }
 
 function playCollectSound(comboIndex) {
@@ -344,7 +371,7 @@ function startFallingSequence() {
 function stopFallingSequence() { isFallingSoundPlaying = false; if (fallTimeoutID) { clearTimeout(fallTimeoutID); fallTimeoutID = null; } }
 
 // ==========================================
-//  PART 2: 遊戲邏輯 (累積計數)
+//  PART 2: 遊戲邏輯
 // ==========================================
 let squid;
 let particles = []; let stars = []; let terrain; let pearls = [];
@@ -357,8 +384,9 @@ function setup() {
     createCanvas(windowWidth, windowHeight);
     squid = new TechSquid(width * 0.25, height/2);
     terrain = new CaveTerrain();
-    document.getElementById('start-btn').onclick = initAudio;
-    document.getElementById('hid-btn').onclick = connectHID;
+    
+    document.getElementById('start-btn').onclick = () => initAudio(true);
+    document.getElementById('ble-btn').onclick = connectBLE;
     noLoop();
 }
 
@@ -431,8 +459,10 @@ function draw() {
         terrain.display(); squid.display();
         startCountdownTimer--;
         let seconds = ceil(startCountdownTimer / 60);
+        // ★ 倒數音效：3,2,1 聲音一致 (C5)，GO 是 C6 ★
         if (startCountdownTimer % 60 === 0 && startCountdownTimer > 0) playCountdownBeep("C5");
         if (startCountdownTimer === 0) playCountdownBeep("C6");
+        
         textAlign(CENTER, CENTER); textStyle(BOLD); textSize(150);
         if (startCountdownTimer > 0) { fill(255); text(seconds, width/2, height/2); }
         else { fill(0, 255, 255); text("GO!", width/2, height/2); }
