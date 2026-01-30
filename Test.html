@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - Stereo Grip</title>
+  <title>Cyber Squid - Dual HID Punch</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -30,27 +30,54 @@
     }
     button:hover { background: rgba(0, 255, 255, 0.3); transform: scale(1.05); }
     button:active { transform: scale(0.95); }
-    button:disabled { border-color: #555; color: #555; cursor: not-allowed; opacity: 0.6; }
+    button:disabled { border-color: #555; color: #555; cursor: not-allowed; }
 
     #hid-status {
         margin-top: 20px; font-size: 14px; color: #888;
         display: flex; flex-direction: column; gap: 8px;
         background: rgba(0,0,0,0.5); padding: 15px; border-radius: 10px;
-        min-width: 300px; text-align: left;
+        min-width: 250px; text-align: left;
     }
-    .device-row { display: flex; justify-content: space-between; width: 100%; align-items: center; }
-    .indicator { width: 10px; height: 10px; border-radius: 50%; background: #333; margin-right: 10px; display: inline-block;}
-    .indicator.active { background: #0f0; box-shadow: 0 0 8px #0f0; }
-
-    #hud { position: absolute; top: 20px; left: 20px; color: #0ff; font-size: 24px; pointer-events: none; text-shadow: 0 0 5px #0ff; display: none; font-weight: bold; }
-    #hp-bar { position: absolute; top: 20px; right: 20px; font-size: 30px; color: #ff5555; text-shadow: 0 0 5px #f00; display: none; text-align: right; }
-
-    .combo-text { position: absolute; color: #ffff00; font-weight: bold; font-size: 24px; pointer-events: none; animation: floatUp 1s forwards; text-shadow: 0 0 10px #ffaa00; z-index: 10; }
-    .jackpot-text { position: absolute; color: #FFD700; font-weight: bold; font-size: 50px; pointer-events: none; animation: zoomOut 3s forwards; text-shadow: 0 0 30px #ffffff; z-index: 20; width: 100%; text-align: center; top: 35%; }
-    .evo-text { position: absolute; color: #00ffff; font-weight: bold; font-size: 40px; pointer-events: none; animation: zoomOut 2s forwards; text-shadow: 0 0 20px #ffffff; z-index: 20; width: 100%; text-align: center; top: 30%; }
+    .device-row { display: flex; justify-content: space-between; width: 100%; }
     
-    @keyframes floatUp { 0% { transform: translateY(0) scale(1); opacity: 1; } 50% { transform: translateY(-30px) scale(1.5); opacity: 1; } 100% { transform: translateY(-60px) scale(1); opacity: 0; } }
-    @keyframes zoomOut { 0% { transform: scale(0.5); opacity: 0; } 50% { transform: scale(1.2); opacity: 1; } 100% { transform: scale(2.0); opacity: 0; } }
+    #hud {
+      position: absolute; top: 20px; left: 20px; color: #0ff;
+      font-size: 24px; pointer-events: none; text-shadow: 0 0 5px #0ff;
+      display: none; font-weight: bold;
+    }
+    
+    #hp-bar {
+        position: absolute; top: 20px; right: 20px;
+        font-size: 30px; color: #ff5555; text-shadow: 0 0 5px #f00;
+        display: none;
+        text-align: right;
+    }
+
+    .combo-text {
+        position: absolute; color: #ffff00; font-weight: bold; font-size: 24px;
+        pointer-events: none; animation: floatUp 1s forwards; text-shadow: 0 0 10px #ffaa00; z-index: 10;
+    }
+    .jackpot-text {
+        position: absolute; color: #FFD700; font-weight: bold; font-size: 50px;
+        pointer-events: none; animation: zoomOut 3s forwards; text-shadow: 0 0 30px #ffffff;
+        z-index: 20; width: 100%; text-align: center; top: 35%;
+    }
+    .evo-text {
+        position: absolute; color: #00ffff; font-weight: bold; font-size: 40px;
+        pointer-events: none; animation: zoomOut 2s forwards; text-shadow: 0 0 20px #ffffff;
+        z-index: 20; width: 100%; text-align: center; top: 30%;
+    }
+    
+    @keyframes floatUp {
+        0% { transform: translateY(0) scale(1); opacity: 1; }
+        50% { transform: translateY(-30px) scale(1.5); opacity: 1; }
+        100% { transform: translateY(-60px) scale(1); opacity: 0; }
+    }
+    @keyframes zoomOut {
+        0% { transform: scale(0.5); opacity: 0; }
+        50% { transform: scale(1.2); opacity: 1; }
+        100% { transform: scale(2.0); opacity: 0; }
+    }
   </style>
 </head>
 <body>
@@ -60,201 +87,153 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 16px;">雙球立體聲版 (WebHID)</p>
+    <p style="color: #0aa; font-size: 20px;">雙球體感揮拳版</p>
     
     <div class="btn-group">
-        <button id="hid-btn">🔵 配對/掃描 MB02</button>
-        <button id="start-btn" disabled>等待連接...</button>
+        <button id="hid-btn">🔵 連接握力球</button>
+        <button id="start-btn">開始冒險</button>
     </div>
     
     <div id="hid-status">
-        <div class="device-row" id="row-p1">
-            <span><div class="indicator" id="led-p1"></div> P1 (左聲道)</span>
-            <span id="debug-p1" style="font-family: monospace; color: #555;">--</span>
+        <div class="device-row">
+            <span id="p1-status" style="color: #888;">P1: 未連接</span>
+            <span id="p1-debug" style="color: #555; font-family: monospace;">Force: 0.0</span>
         </div>
-        <div class="device-row" id="row-p2" style="border-top: 1px solid #333; padding-top: 5px;">
-            <span><div class="indicator" id="led-p2"></div> P2 (右聲道)</span>
-            <span id="debug-p2" style="font-family: monospace; color: #555;">--</span>
+        <div class="device-row" style="border-top: 1px solid #333; padding-top: 5px;">
+            <span id="p2-status" style="color: #888;">P2: 未連接</span>
+            <span id="p2-debug" style="color: #555; font-family: monospace;">Force: 0.0</span>
         </div>
     </div>
   </div>
 
 <script>
 // ==========================================
-//  PART 0: WebHID 自動管理系統
+//  PART 0: 雙模體感演算法 (WebHID / BLE 自動切換)
 // ==========================================
 const GRIP_VENDOR_ID = 0x08E2;
 const GRIP_PRODUCT_ID = 0x0101;
 
-// ★ 調整後的體感參數 ★
+// ★ BLE 專用配置 (需根據 MB02 韌體設定調整) ★
+const BLE_SERVICE_UUID = '0000ffe0-0000-1000-8000-00805f9b34fb'; 
+const BLE_CHAR_UUID    = '0000ffe1-0000-1000-8000-00805f9b34fb';
+
+let player1Device = null; // 存放 HIDDevice 或 BluetoothRemoteGATTCharacteristic
+let player2Device = null;
+
 const PUNCH_THRESHOLD = 6.0;
-const PUNCH_COOLDOWN = 220; // 增加到 220ms 以過濾重複觸發
+const PUNCH_COOLDOWN = 150;
 
-let activeDevices = [];
-let deviceStates = new Map();
+let p1LastForce = 0;
+let p1LastTriggerTime = 0;
+let p2LastForce = 0;
+let p2LastTriggerTime = 0;
 
-if (!("hid" in navigator)) {
-    document.getElementById('hid-btn').innerText = "⚠️ 不支援 WebHID";
-    document.getElementById('hid-btn').disabled = true;
-} else {
-    navigator.hid.addEventListener('connect', handleDeviceConnect);
-    navigator.hid.addEventListener('disconnect', handleDeviceDisconnect);
-    checkPreviouslyPairedDevices();
-}
+// 偵測是否為 Android 環境
+const isAndroid = /Android/i.test(navigator.userAgent);
 
-async function checkPreviouslyPairedDevices() {
-    const devices = await navigator.hid.getDevices();
-    const mb02Devices = devices.filter(d => d.vendorId === GRIP_VENDOR_ID && d.productId === GRIP_PRODUCT_ID);
-    if (mb02Devices.length > 0) {
-        for (let d of mb02Devices) { await openDevice(d); }
+// 初始化 UI 狀態
+window.onload = () => {
+    const btn = document.getElementById('hid-btn');
+    const status = document.getElementById('hid-status');
+    
+    if (isAndroid) {
+        status.innerText = "📱 Android 模式：請點擊連線藍牙";
+        btn.innerText = "🔵 連線 MB02 (BLE)";
+    } else if (!("hid" in navigator)) {
+        status.innerText = "⚠️ 瀏覽器不支援 WebHID，請使用 Chrome/Edge";
+        btn.disabled = true;
+    }
+};
+
+// 統一入口點
+async function connectGrip() {
+    if (isAndroid) {
+        await connectBLE();
+    } else {
+        await connectHID();
     }
 }
 
-async function requestNewDevice() {
+// --- [PC 專用] WebHID 實作 ---
+async function connectHID() {
     try {
         const devices = await navigator.hid.requestDevice({
             filters: [{ vendorId: GRIP_VENDOR_ID, productId: GRIP_PRODUCT_ID }]
         });
-        for (let d of devices) { await openDevice(d); }
-    } catch (err) { console.error("配對取消", err); }
-}
-
-function handleDeviceConnect(event) {
-    const device = event.device;
-    if (device.vendorId === GRIP_VENDOR_ID && device.productId === GRIP_PRODUCT_ID) {
-        openDevice(device);
-    }
-}
-
-function handleDeviceDisconnect(event) {
-    const device = event.device;
-    activeDevices = activeDevices.filter(d => d !== device);
-    deviceStates.delete(device);
-    updateUI();
-}
-
-async function openDevice(device) {
-    if (activeDevices.includes(device)) return;
-    if (!device.opened) {
-        try { await device.open(); } catch(e) { console.error(e); return; }
-    }
-    device.addEventListener("inputreport", handleInputReport);
-    activeDevices.push(device);
-    deviceStates.set(device, { lastForce: 0, lastTime: 0 });
-    updateUI();
-}
-
-function updateUI() {
-    const p1Status = document.getElementById('led-p1');
-    const p2Status = document.getElementById('led-p2');
-    const btn = document.getElementById('start-btn');
-    
-    if (activeDevices.length > 0) {
-        p1Status.classList.add('active');
-        btn.disabled = false;
-        btn.innerText = "開始冒險";
-        btn.style.borderColor = "#0f0";
-        btn.style.color = "#0f0";
-    } else {
-        p1Status.classList.remove('active');
-        btn.disabled = true;
-        btn.innerText = "等待裝置...";
-        btn.style.borderColor = "#555";
-        btn.style.color = "#555";
-    }
-    
-    if (activeDevices.length > 1) p2Status.classList.add('active');
-    else p2Status.classList.remove('active');
-}
-
-function handleInputReport(event) {
-    const { data, device } = event;
-    if (data.byteLength < 32) return;
-
-    const ax = data.getFloat32(4, true);
-    const ay = data.getFloat32(8, true);
-    const az = data.getFloat32(12, true);
-    
-    const currentForce = Math.sqrt(ax*ax + ay*ay + az*az);
-    const now = Date.now();
-    
-    let state = deviceStates.get(device);
-    if (!state) return;
-
-    const delta = Math.abs(currentForce - state.lastForce);
-    const playerIndex = activeDevices.indexOf(device); // 0 = P1, 1 = P2
-    
-    // Debug Display
-    const debugId = playerIndex === 0 ? 'debug-p1' : (playerIndex === 1 ? 'debug-p2' : null);
-    if (debugId) document.getElementById(debugId).innerText = `G: ${delta.toFixed(1)}`;
-
-    // Trigger
-    if (delta > PUNCH_THRESHOLD && (now - state.lastTime > PUNCH_COOLDOWN)) {
-        if (debugId) {
-            document.getElementById(debugId).style.color = "#fff";
-            setTimeout(() => document.getElementById(debugId).style.color = "#555", 100);
+        for (let device of devices) {
+            if (!device.opened) await device.open();
+            device.addEventListener("inputreport", (e) => {
+                // HID 封包結構通常從 Offset 4 開始是加速度
+                handleSensorLogic(e.data, device);
+            });
+            assignPlayer(device);
         }
+    } catch (err) { console.error("HID Error:", err); }
+}
 
-        // ★ 呼叫動作，並傳入玩家編號 (1 or 2) 以便做 Panning ★
-        triggerPlayerAction(playerIndex + 1);
+// --- [Android 專用] Web Bluetooth 實作 ---
+async function connectBLE() {
+    try {
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [{ namePrefix: 'MB02' }],
+            optionalServices: [BLE_SERVICE_UUID]
+        });
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(BLE_SERVICE_UUID);
+        const char = await service.getCharacteristic(BLE_CHAR_UUID);
         
-        state.lastTime = now;
+        await char.startNotifications();
+        char.addEventListener('characteristicvaluechanged', (e) => {
+            // BLE 封包有時不帶 Report ID，如果位移不對，請嘗試將 4 改為 0
+            handleSensorLogic(e.target.value, char);
+        });
+        
+        assignPlayer(char);
+        device.addEventListener('gattserverdisconnected', () => removePlayer(char));
+    } catch (err) { console.error("BLE Error:", err); }
+}
+
+// 角色分配中心
+function assignPlayer(device) {
+    if (!player1Device) {
+        player1Device = device;
+        updateStatus("p1", `P1 已連線`, "#0f0");
+    } else if (player1Device !== device && !player2Device) {
+        player2Device = device;
+        updateStatus("p2", `P2 已連線`, "#0f0");
     }
-    state.lastForce = currentForce;
 }
 
-// 統一觸發 (接收玩家編號 1 或 2)
-function triggerPlayerAction(playerNum) {
-    // ★ 關鍵修正：只有在遊戲進行中 (gameState 1) 才允許跳躍和發聲 ★
-    // 這樣倒數時 (gameState 4) 握力球就會被靜音
-    if (gameState !== 1) return;
-
-    if (!squid) return;
-    let power = random(0.6, 0.9);
-    squid.jump(power);
-    
-    // 播放帶有 Panning 的音效
-    playJumpSound(power, playerNum);
+function removePlayer(device) {
+    if (player1Device === device) { player1Device = null; updateStatus("p1", "P1 斷開", "#555"); }
+    if (player2Device === device) { player2Device = null; updateStatus("p2", "P2 斷開", "#555"); }
 }
 
+// ★ 核心演算法：統一處理數據 (DataView) ★
+function handleSensorLogic(data
+
 // ==========================================
-//  PART 1: 聲音系統 (立體聲 + 方波珍珠)
+//  PART 1: 聲音系統 (方波池 + 接龍 + 深海)
 // ==========================================
-let jumpSynthP1, jumpSynthP2; // 分離的跳躍合成器
-let fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, victorySynth, dieSynth;
+let jumpSynth, fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, victorySynth, dieSynth;
 let ambientNoise;
 let pearlSynths = []; let pearlSynthIndex = 0;
 let isAudioReady = false; let audioInitStarted = false;
 let lastJumpPitch = 600; let fallTimeoutID = null; let isFallingSoundPlaying = false;
 const noteMap = ["C5", "D5", "E5", "G5", "A5", "C6", "D6", "E6", "G6", "A6", "C7", "E7", "G7"];
 
-async function initAudio(startNow = true) {
+async function initAudio() {
     if (audioInitStarted) return;
     audioInitStarted = true;
-    
     const btn = document.getElementById('start-btn');
-    if(startNow) btn.innerText = "啟動中...";
-    
+    btn.innerText = "啟動中...";
     try {
         await Tone.start();
         if (Tone.context.state !== 'running') await Tone.context.resume();
         Tone.Destination.volume.value = 0;
 
-        // ★ P1 (左) 跳躍音效 ★
-        const panner1 = new Tone.Panner(-0.8).toDestination();
-        jumpSynthP1 = new Tone.Synth({
-            oscillator: { type: "sine" },
-            envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 }
-        }).connect(panner1);
-        jumpSynthP1.volume.value = -2;
-
-        // ★ P2 (右) 跳躍音效 ★
-        const panner2 = new Tone.Panner(0.8).toDestination();
-        jumpSynthP2 = new Tone.Synth({
-            oscillator: { type: "sine" },
-            envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 }
-        }).connect(panner2);
-        jumpSynthP2.volume.value = -2;
+        jumpSynth = new Tone.Synth({ oscillator: { type: "sine" }, envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 } }).toDestination();
+        jumpSynth.volume.value = -2;
 
         fallSynth = new Tone.Synth({ oscillator: { type: "sine" }, envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 } }).toDestination();
         fallSynth.volume.value = -5;
@@ -283,50 +262,31 @@ async function initAudio(startNow = true) {
         ambientNoise = new Tone.Noise("brown").connect(filter);
         ambientNoise.volume.value = -22; ambientNoise.start();
 
-        // 倒數音效使用其中一個 synth 即可 (例如 P1 的，但設為中間)
-        // 為了簡單，我們直接用 jumpSynthP1 發聲，或者額外宣告一個 countdown synth
-        // 這裡直接借用 fallSynth 來發倒數音，因為它是單聲道且在中間 (預設)
-        
-        isAudioReady = true;
-        
-        if(startNow) {
-            document.getElementById('overlay').style.display = 'none';
-            document.getElementById('hud').style.display = 'block';
-            document.getElementById('hp-bar').style.display = 'block';
-            startCountdown();
-        }
+        const testBeep = new Tone.Synth().toDestination();
+        testBeep.triggerAttackRelease("C6", "32n");
 
-    } catch (e) { console.error("Audio Init Error:", e); }
+        isAudioReady = true;
+        document.getElementById('overlay').style.display = 'none';
+        document.getElementById('hud').style.display = 'block';
+        document.getElementById('hp-bar').style.display = 'block';
+        startCountdown();
+
+    } catch (e) { console.error("Audio Init Error:", e); document.getElementById('status-msg').innerText = "音效啟動失敗"; }
 }
 
-function playJumpSound(power, playerNum) {
+function playJumpSound(power) {
     if (!isAudioReady) return;
     stopFallingSequence();
     let pitch = map(power, 0.0, 1.0, 300, 700);
     lastJumpPitch = pitch;
-    
-    // 根據玩家選擇發聲器
-    let targetSynth;
-    if (playerNum === 2) targetSynth = jumpSynthP2;
-    else targetSynth = jumpSynthP1; // 預設 P1 (左/中)
-
-    if (squid && squid.evolutionLevel >= 5) {
-        targetSynth.oscillator.type = "square"; targetSynth.volume.value = -12;
-    } else {
-        targetSynth.oscillator.type = "sine"; targetSynth.volume.value = -2;
-    }
-    
-    try { targetSynth.triggerAttackRelease(pitch, "8n"); } catch(e){}
+    if (squid && squid.evolutionLevel >= 5) { jumpSynth.oscillator.type = "square"; jumpSynth.volume.value = -12; }
+    else { jumpSynth.oscillator.type = "sine"; jumpSynth.volume.value = -2; }
+    try { jumpSynth.triggerAttackRelease(pitch, "8n"); } catch(e){}
 }
 
 function playCountdownBeep(pitch) {
     if (!isAudioReady) return;
-    // 使用 fallSynth 代替倒數音 (確保置中)
-    try {
-        fallSynth.oscillator.type = "sine";
-        fallSynth.volume.value = -5;
-        fallSynth.triggerAttackRelease(pitch, "32n");
-    } catch(e){}
+    try { jumpSynth.oscillator.type = "sine"; jumpSynth.volume.value = -5; jumpSynth.triggerAttackRelease(pitch, "32n"); } catch(e){}
 }
 
 function playCollectSound(comboIndex) {
@@ -352,10 +312,8 @@ function startFallingSequence() {
     if (!isAudioReady || isFallingSoundPlaying) return;
     isFallingSoundPlaying = true;
     let currentPitch = lastJumpPitch; let currentGap = 0.15; let currentVol = -5;
-    // 掉落音效統一用 fallSynth (置中)
-    fallSynth.oscillator.type = (squid && squid.evolutionLevel >= 5) ? "square" : "sine";
-    fallSynth.volume.value = (squid && squid.evolutionLevel >= 5) ? -12 : -5;
-
+    if (squid && squid.evolutionLevel >= 5) { fallSynth.oscillator.type = "square"; fallSynth.volume.value = -12; }
+    else { fallSynth.oscillator.type = "sine"; fallSynth.volume.value = -5; }
     function playBeat() {
         if (!isFallingSoundPlaying) return;
         let now = Tone.now();
@@ -368,7 +326,7 @@ function startFallingSequence() {
 function stopFallingSequence() { isFallingSoundPlaying = false; if (fallTimeoutID) { clearTimeout(fallTimeoutID); fallTimeoutID = null; } }
 
 // ==========================================
-//  PART 2: 遊戲邏輯 (累積計數 + 防卡死)
+//  PART 2: 遊戲邏輯 (累積進化)
 // ==========================================
 let squid;
 let particles = []; let stars = []; let terrain; let pearls = [];
@@ -382,8 +340,8 @@ function setup() {
     squid = new TechSquid(width * 0.25, height/2);
     terrain = new CaveTerrain();
     
-    document.getElementById('start-btn').onclick = () => initAudio(true);
-    document.getElementById('hid-btn').onclick = requestNewDevice;
+    document.getElementById('start-btn').onclick = initAudio;
+    document.getElementById('hid-btn').onclick = connectHID;
     noLoop();
 }
 
@@ -456,10 +414,8 @@ function draw() {
         terrain.display(); squid.display();
         startCountdownTimer--;
         let seconds = ceil(startCountdownTimer / 60);
-        // ★ 倒數音 (3,2,1 C5 / GO C6)
         if (startCountdownTimer % 60 === 0 && startCountdownTimer > 0) playCountdownBeep("C5");
         if (startCountdownTimer === 0) playCountdownBeep("C6");
-        
         textAlign(CENTER, CENTER); textStyle(BOLD); textSize(150);
         if (startCountdownTimer > 0) { fill(255); text(seconds, width/2, height/2); }
         else { fill(0, 255, 255); text("GO!", width/2, height/2); }
@@ -523,13 +479,18 @@ function draw() {
         let obstacleHit = terrain.checkObstacleCollision(squid);
 
         if (collision.hit || obstacleHit) {
-            // ★ 強力反彈 (Anti-Stuck) ★
-            squid.vel.x = -15;
-            if(squid.pos.y < height/2) squid.vel.y = 5; else squid.vel.y = -5;
+            if (collision.type === 'top') {
+                squid.pos.y = collision.limit + squid.size/2 + 2; if (squid.vel.y < 0) squid.vel.y *= -0.5;
+            } else if (collision.type === 'bottom') {
+                squid.pos.y = collision.limit - squid.size/2 - 2; if (squid.vel.y > 0) squid.vel.y *= -0.5;
+            } else if (obstacleHit) {
+                squid.vel.x = -8; squid.vel.y = random(-5, 5);
+            }
 
             if (!squid.isInvincible) {
-                squid.takeDamage(); comboCount = 0; shakeAmount = 20;
+                squid.takeDamage(); comboCount = 0; shakeAmount = 15;
                 playCollisionSound(); updateHPDisplay();
+                if (collision.type === 'top') squid.vel.y = 8; else if (collision.type === 'bottom') squid.vel.y = -12;
                 if (squid.hp <= 0) triggerDeath();
             }
         }
@@ -583,7 +544,7 @@ function triggerVictory() {
 
 function handleInput(e) {
     if(e && e.cancelable) e.preventDefault();
-    if (gameState === 1) { triggerPlayerAction(1); } // 滑鼠預設 P1
+    if (gameState === 1) { triggerPlayerAction(); }
     else if ((gameState === 2 || gameState === 3) && canRestart) { squid.evolutionLevel = 0; startCountdown(); }
     return false;
 }
