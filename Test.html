@@ -174,18 +174,24 @@ async function connectHID() {
 // --- [Android] Web Bluetooth 實作 ---
 async function connectBLE() {
     try {
+        // 先改成最寬鬆模式，看看能不能跳出清單
         const device = await navigator.bluetooth.requestDevice({
-            filters: [{ namePrefix: 'MB02' }],
-            optionalServices: [BLE_SERVICE_UUID]
+            acceptAllDevices: true, 
+            optionalServices: [BLE_SERVICE_UUID] 
         });
+        
         const server = await device.gatt.connect();
+        // 如果卡在下一行，代表 BLE_SERVICE_UUID 不正確
         const service = await server.getPrimaryService(BLE_SERVICE_UUID);
         const char = await service.getCharacteristic(BLE_CHAR_UUID);
+        
         await char.startNotifications();
         char.addEventListener('characteristicvaluechanged', (e) => handleSensorLogic(e.target.value, char));
         assignPlayer(char);
-        device.addEventListener('gattserverdisconnected', () => removePlayer(char));
-    } catch (err) { console.error("BLE Error:", err); }
+    } catch (err) { 
+        console.error("BLE Error:", err);
+        alert("連線失敗: " + err.message); // 增加 Alert 方便手機直接看錯誤
+    }
 }
 
 // 角色管理
