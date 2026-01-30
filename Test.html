@@ -81,96 +81,81 @@
 
 <script>
 // ==========================================
-//  PART 0: WebHID 自動管理系統
+//  PART 0: 自動通訊切換系統 (WebHID / Web Bluetooth)
 // ==========================================
 const GRIP_VENDOR_ID = 0x08E2;
 const GRIP_PRODUCT_ID = 0x0101;
+// BLE 專用 UUID (請根據 MB02 的說明書修改，以下為常見範例)
+const BLE_SERVICE_UUID = '0000ffe0-0000-1000-8000-00805f9b34fb'; 
+const BLE_CHAR_UUID    = '0000ffe1-0000-1000-8000-00805f9b34fb';
 
-// ★ 調整後的體感參數 ★
 const PUNCH_THRESHOLD = 6.0;
-const PUNCH_COOLDOWN = 220; // 增加到 220ms 以過濾重複觸發
+const PUNCH_COOLDOWN = 220;
 
-let activeDevices = [];
+let activeDevices = []; // 存放 HIDDevice 或 BluetoothRemoteGATTCharacteristic
 let deviceStates = new Map();
+let isAndroid = /Android/i.test(navigator.userAgent);
 
-if (!("hid" in navigator)) {
-    document.getElementById('hid-btn').innerText = "⚠️ 不支援 WebHID";
-    document.getElementById('hid-btn').disabled = true;
-} else {
-    navigator.hid.addEventListener('connect', handleDeviceConnect);
-    navigator.hid.addEventListener('disconnect', handleDeviceDisconnect);
-    checkPreviouslyPairedDevices();
+// 初始化按鈕文字
+const hidBtn = document.getElementById('hid-btn');
+if (isAndroid) {
+    hidBtn.innerText = "📱 藍牙掃描 (Android)";
+} else if (!("hid" in navigator)) {
+    hidBtn.innerText = "⚠️ 不支援此瀏覽器";
+    hidBtn.disabled = true;
 }
 
-async function checkPreviouslyPairedDevices() {
-    const devices = await navigator.hid.getDevices();
-    const mb02Devices = devices.filter(d => d.vendorId === GRIP_VENDOR_ID && d.productId === GRIP_PRODUCT_ID);
-    if (mb02Devices.length > 0) {
-        for (let d of mb02Devices) { await openDevice(d); }
+// 統一按鈕事件
+hidBtn.onclick = async () => {
+    if (isAndroid) {
+        await requestBLEDevice();
+    } else {
+        await requestHIDDevice();
     }
-}
+};
 
-async function requestNewDevice() {
+// --- 1. WebHID 邏輯 (PC) ---
+async function requestHIDDevice() {
     try {
         const devices = await navigator.hid.requestDevice({
             filters: [{ vendorId: GRIP_VENDOR_ID, productId: GRIP_PRODUCT_ID }]
         });
-        for (let d of devices) { await openDevice(d); }
-    } catch (err) { console.error("配對取消", err); }
+        for (let d of devices) { 
+            if (!d.opened) await d.open();
+            d.oninputreport = (e) => handleRawData(e.data, activeDevices.indexOf(d));
+            addActiveDevice(d);
+        }
+    } catch (err) { console.log("HID 取消", err); }
 }
 
-function handleDeviceConnect(event) {
-    const device = event.device;
-    if (device.vendorId === GRIP_VENDOR_ID && device.productId === GRIP_PRODUCT_ID) {
-        openDevice(device);
-    }
+// --- 2. Web Bluetooth 邏輯 (Android) ---
+async function requestBLEDevice() {
+    try {
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [{ namePrefix: 'MB02' }, { services: [BLE_SERVICE_UUID] }],
+            optionalServices: [BLE_SERVICE_UUID]
+        });
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(BLE_SERVICE_UUID);
+        const char = await service.getCharacteristic(BLE_CHAR_UUID);
+        
+        await char.startNotifications();
+        char.addEventListener('characteristicvaluechanged', (e) => {
+            handleRawData(e.target.value, activeDevices.indexOf(char));
+        });
+
+        addActiveDevice(char);
+        // 監聽斷線
+        device.addEventListener('gattserverdisconnected', () => handleDisconnect(char));
+    } catch (err) { console.error("BLE 錯誤:", err); }
 }
 
-function handleDeviceDisconnect(event) {
-    const device = event.device;
-    activeDevices = activeDevices.filter(d => d !== device);
-    deviceStates.delete(device);
-    updateUI();
-}
+// --- 3. 統一數據處理 ---
+function handleRawData(data, playerIndex) {
+    if (data.byteLength < 16) return; // 根據實際封包長度調整
 
-async function openDevice(device) {
-    if (activeDevices.includes(device)) return;
-    if (!device.opened) {
-        try { await device.open(); } catch(e) { console.error(e); return; }
-    }
-    device.addEventListener("inputreport", handleInputReport);
-    activeDevices.push(device);
-    deviceStates.set(device, { lastForce: 0, lastTime: 0 });
-    updateUI();
-}
-
-function updateUI() {
-    const p1Status = document.getElementById('led-p1');
-    const p2Status = document.getElementById('led-p2');
-    const btn = document.getElementById('start-btn');
-    
-    if (activeDevices.length > 0) {
-        p1Status.classList.add('active');
-        btn.disabled = false;
-        btn.innerText = "開始冒險";
-        btn.style.borderColor = "#0f0";
-        btn.style.color = "#0f0";
-    } else {
-        p1Status.classList.remove('active');
-        btn.disabled = true;
-        btn.innerText = "等待裝置...";
-        btn.style.borderColor = "#555";
-        btn.style.color = "#555";
-    }
-    
-    if (activeDevices.length > 1) p2Status.classList.add('active');
-    else p2Status.classList.remove('active');
-}
-
-function handleInputReport(event) {
-    const { data, device } = event;
-    if (data.byteLength < 32) return;
-
+    // 假設 MB02 的數據格式在 HID 和 BLE 下一致
+    // 依然讀取 Float32 的加速度值
     const ax = data.getFloat32(4, true);
     const ay = data.getFloat32(8, true);
     const az = data.getFloat32(12, true);
@@ -178,43 +163,37 @@ function handleInputReport(event) {
     const currentForce = Math.sqrt(ax*ax + ay*ay + az*az);
     const now = Date.now();
     
+    // 取得該裝置的狀態
+    let device = activeDevices[playerIndex];
     let state = deviceStates.get(device);
     if (!state) return;
 
     const delta = Math.abs(currentForce - state.lastForce);
-    const playerIndex = activeDevices.indexOf(device); // 0 = P1, 1 = P2
     
-    // Debug Display
+    // UI Debug
     const debugId = playerIndex === 0 ? 'debug-p1' : (playerIndex === 1 ? 'debug-p2' : null);
     if (debugId) document.getElementById(debugId).innerText = `G: ${delta.toFixed(1)}`;
 
-    // Trigger
     if (delta > PUNCH_THRESHOLD && (now - state.lastTime > PUNCH_COOLDOWN)) {
-        if (debugId) {
-            document.getElementById(debugId).style.color = "#fff";
-            setTimeout(() => document.getElementById(debugId).style.color = "#555", 100);
-        }
-
-        // ★ 呼叫動作，並傳入玩家編號 (1 or 2) 以便做 Panning ★
         triggerPlayerAction(playerIndex + 1);
-        
         state.lastTime = now;
     }
     state.lastForce = currentForce;
 }
 
-// 統一觸發 (接收玩家編號 1 或 2)
-function triggerPlayerAction(playerNum) {
-    // ★ 關鍵修正：只有在遊戲進行中 (gameState 1) 才允許跳躍和發聲 ★
-    // 這樣倒數時 (gameState 4) 握力球就會被靜音
-    if (gameState !== 1) return;
+// --- 輔助函式 ---
+function addActiveDevice(device) {
+    if (!activeDevices.includes(device)) {
+        activeDevices.push(device);
+        deviceStates.set(device, { lastForce: 0, lastTime: 0 });
+        updateUI();
+    }
+}
 
-    if (!squid) return;
-    let power = random(0.6, 0.9);
-    squid.jump(power);
-    
-    // 播放帶有 Panning 的音效
-    playJumpSound(power, playerNum);
+function handleDisconnect(device) {
+    activeDevices = activeDevices.filter(d => d !== device);
+    deviceStates.delete(device);
+    updateUI();
 }
 
 // ==========================================
