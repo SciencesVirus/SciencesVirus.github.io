@@ -108,13 +108,11 @@
 
 <script>
 // ==========================================
-//  PART 0: 雙模體感演算法 (WebHID / BLE 自動切換)
-// ==========================================
-// ==========================================
-//  PART 0: 系統初始化 (修正 Android 偵測)
+//  PART 0: 雙模系統初始化 (WebHID / BLE 自動切換)
 // ==========================================
 const GRIP_VENDOR_ID = 0x08E2;
 const GRIP_PRODUCT_ID = 0x0101;
+// BLE 專用 UUID
 const BLE_SERVICE_UUID = '0000ffe0-0000-1000-8000-00805f9b34fb'; 
 const BLE_CHAR_UUID    = '0000ffe1-0000-1000-8000-00805f9b34fb';
 
@@ -123,47 +121,40 @@ let player1Device = null;
 let player2Device = null;
 const isAndroid = /Android/i.test(navigator.userAgent);
 
-// 頁面載入後執行的檢查函式
+// 體感判定參數
+const PUNCH_THRESHOLD = 6.0;
+const PUNCH_COOLDOWN = 150;
+let p1LastForce = 0; let p1LastTriggerTime = 0;
+let p2LastForce = 0; let p2LastTriggerTime = 0;
+
+// 1. 環境支援度檢查
 function checkSupport() {
     const btn = document.getElementById('hid-btn');
     const status = document.getElementById('hid-status');
 
-    // 優先檢查是否為 Android
     if (isAndroid) {
         status.innerText = "📱 Android 模式：請連線藍牙";
         btn.innerText = "🔵 連線 MB02 (藍牙)";
         btn.disabled = false;
-        btn.onclick = connectGrip; // 綁定統一連線函式
-    } 
-    // 若不是 Android，再檢查 PC 是否支援 HID
-    else if ("hid" in navigator) {
+        btn.onclick = connectGrip;
+    } else if ("hid" in navigator) {
         status.innerText = "💻 PC 模式：請連線握力球";
         btn.innerText = "🔵 連線 MB02 (HID)";
         btn.disabled = false;
         btn.onclick = connectGrip;
-    } 
-    // 兩者都不支援
-    else {
+    } else {
         status.innerText = "⚠️ 瀏覽器不支援 WebHID/藍牙 (請用 Chrome)";
         btn.disabled = true;
     }
 }
 
-// 執行檢查
-checkSupport();
-
-// 統一連線入口
+// 2. 統一連線入口
 async function connectGrip() {
-    // 再次確認環境
-    if (isAndroid) {
-        await connectBLE();
-    } else {
-        await connectHID();
-    }
+    if (isAndroid) { await connectBLE(); } 
+    else { await connectHID(); }
 }
 
-// --- 下面接你原本的 connectHID() 與 connectBLE() 實作 ---
-// --- [PC 專用] WebHID 實作 ---
+// --- [PC] WebHID 實作 ---
 async function connectHID() {
     try {
         const devices = await navigator.hid.requestDevice({
@@ -171,16 +162,13 @@ async function connectHID() {
         });
         for (let device of devices) {
             if (!device.opened) await device.open();
-            device.addEventListener("inputreport", (e) => {
-                // HID 封包結構通常從 Offset 4 開始是加速度
-                handleSensorLogic(e.data, device);
-            });
+            device.addEventListener("inputreport", (e) => handleSensorLogic(e.data, device));
             assignPlayer(device);
         }
     } catch (err) { console.error("HID Error:", err); }
 }
 
-// --- [Android 專用] Web Bluetooth 實作 ---
+// --- [Android] Web Bluetooth 實作 ---
 async function connectBLE() {
     try {
         const device = await navigator.bluetooth.requestDevice({
@@ -190,37 +178,91 @@ async function connectBLE() {
         const server = await device.gatt.connect();
         const service = await server.getPrimaryService(BLE_SERVICE_UUID);
         const char = await service.getCharacteristic(BLE_CHAR_UUID);
-        
         await char.startNotifications();
-        char.addEventListener('characteristicvaluechanged', (e) => {
-            // BLE 封包有時不帶 Report ID，如果位移不對，請嘗試將 4 改為 0
-            handleSensorLogic(e.target.value, char);
-        });
-        
+        char.addEventListener('characteristicvaluechanged', (e) => handleSensorLogic(e.target.value, char));
         assignPlayer(char);
         device.addEventListener('gattserverdisconnected', () => removePlayer(char));
     } catch (err) { console.error("BLE Error:", err); }
 }
 
-// 角色分配中心
+// 角色管理
 function assignPlayer(device) {
     if (!player1Device) {
         player1Device = device;
-        updateStatus("p1", `P1 已連線`, "#0f0");
+        updateStatusDisplay("p1", "P1 已連線", "#0f0");
     } else if (player1Device !== device && !player2Device) {
         player2Device = device;
-        updateStatus("p2", `P2 已連線`, "#0f0");
+        updateStatusDisplay("p2", "P2 已連線", "#0f0");
     }
 }
 
 function removePlayer(device) {
-    if (player1Device === device) { player1Device = null; updateStatus("p1", "P1 斷開", "#555"); }
-    if (player2Device === device) { player2Device = null; updateStatus("p2", "P2 斷開", "#555"); }
+    if (player1Device === device) { player1Device = null; updateStatusDisplay("p1", "P1 斷開", "#555"); }
+    if (player2Device === device) { player2Device = null; updateStatusDisplay("p2", "P2 斷開", "#555"); }
 }
 
-// ★ 核心演算法：統一處理數據 (DataView) ★
-function handleSensorLogic(data
+function updateStatusDisplay(id, text, color) {
+    const el = document.getElementById(id + '-status');
+    if(el) { el.innerText = id.toUpperCase() + ": " + text; el.style.color = color; }
+}
 
+// 3. ★ 核心演算法：數據處理與揮拳判定 ★
+function handleSensorLogic(data, device) {
+    if (data.byteLength < 16) return;
+
+    // 偏移量修正：HID 通常從 4 開始，BLE 通常從 0 開始
+    // 如果 Android 沒反應，請將 offset 改為 0 測試
+    let offset = (device instanceof HIDDevice) ? 4 : 4; 
+    
+    const ax = data.getFloat32(offset, true);
+    const ay = data.getFloat32(offset + 4, true);
+    const az = data.getFloat32(offset + 8, true);
+    
+    const currentForce = Math.sqrt(ax*ax + ay*ay + az*az);
+    const now = Date.now();
+
+    if (device === player1Device) {
+        processPunch(currentForce, now, 'p1');
+    } else if (device === player2Device) {
+        processPunch(currentForce, now, 'p2');
+    }
+}
+
+function processPunch(currentForce, now, player) {
+    let lastForce = (player === 'p1') ? p1LastForce : p2LastForce;
+    let lastTime = (player === 'p1') ? p1LastTriggerTime : p2LastTriggerTime;
+    
+    const delta = Math.abs(currentForce - lastForce);
+    const debugEl = document.getElementById(`${player}-debug`);
+    if(debugEl) debugEl.innerText = `Force: ${delta.toFixed(1)}`;
+
+    if (delta > PUNCH_THRESHOLD && (now - lastTime > PUNCH_COOLDOWN)) {
+        if (gameState === 1) {
+            triggerPlayerAction();
+            highlightDebug(player);
+        }
+        if (player === 'p1') p1LastTriggerTime = now; else p2LastTriggerTime = now;
+    }
+    if (player === 'p1') p1LastForce = currentForce; else p2LastForce = currentForce;
+}
+
+function highlightDebug(player) {
+    const el = document.getElementById(player + '-debug');
+    if(el) {
+        el.style.color = "#fff";
+        setTimeout(() => el.style.color = "#555", 100);
+    }
+}
+
+function triggerPlayerAction() {
+    if (!squid) return;
+    let power = random(0.6, 0.9);
+    squid.jump(power);
+    playJumpSound(power);
+}
+
+// 初始化
+checkSupport();
 // ==========================================
 //  PART 1: 聲音系統 (方波池 + 接龍 + 深海)
 // ==========================================
