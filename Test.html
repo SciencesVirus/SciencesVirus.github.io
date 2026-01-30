@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - PC WebHID</title>
+  <title>Cyber Squid - Stereo Grip</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -22,7 +22,7 @@
     .btn-group { display: flex; gap: 20px; margin-top: 30px; }
     
     button {
-      padding: 15px 40px; font-size: 20px; color: #0ff; 
+      padding: 15px 40px; font-size: 20px; color: #0ff;
       background: rgba(0, 255, 255, 0.1); border: 2px solid #0ff; border-radius: 50px;
       cursor: pointer; letter-spacing: 2px;
       box-shadow: 0 0 15px rgba(0, 255, 255, 0.2);
@@ -32,7 +32,6 @@
     button:active { transform: scale(0.95); }
     button:disabled { border-color: #555; color: #555; cursor: not-allowed; opacity: 0.6; }
 
-    /* 狀態顯示 */
     #hid-status {
         margin-top: 20px; font-size: 14px; color: #888;
         display: flex; flex-direction: column; gap: 8px;
@@ -61,7 +60,7 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 16px;">電腦 WebHID 雙球版</p>
+    <p style="color: #0aa; font-size: 16px;">雙球立體聲版 (WebHID)</p>
     
     <div class="btn-group">
         <button id="hid-btn">🔵 配對/掃描 MB02</button>
@@ -70,15 +69,12 @@
     
     <div id="hid-status">
         <div class="device-row" id="row-p1">
-            <span><div class="indicator" id="led-p1"></div> P1 (主控)</span>
+            <span><div class="indicator" id="led-p1"></div> P1 (左聲道)</span>
             <span id="debug-p1" style="font-family: monospace; color: #555;">--</span>
         </div>
         <div class="device-row" id="row-p2" style="border-top: 1px solid #333; padding-top: 5px;">
-            <span><div class="indicator" id="led-p2"></div> P2 (輔助)</span>
+            <span><div class="indicator" id="led-p2"></div> P2 (右聲道)</span>
             <span id="debug-p2" style="font-family: monospace; color: #555;">--</span>
-        </div>
-        <div style="font-size: 10px; color: #666; margin-top: 5px;">
-            * 初次使用請點擊配對。<br>* 配對後重整頁面可自動連線。
         </div>
     </div>
   </div>
@@ -90,106 +86,69 @@
 const GRIP_VENDOR_ID = 0x08E2;
 const GRIP_PRODUCT_ID = 0x0101;
 
-// 體感參數 (力度閾值)
-const PUNCH_THRESHOLD = 6.0; 
-const PUNCH_COOLDOWN = 150; 
+// ★ 調整後的體感參數 ★
+const PUNCH_THRESHOLD = 6.0;
+const PUNCH_COOLDOWN = 220; // 增加到 220ms 以過濾重複觸發
 
-// 裝置管理清單
-let activeDevices = []; // 存儲所有連線的 HID Device 物件
-let deviceStates = new Map(); // 存儲每個裝置的狀態 (lastForce, lastTime)
+let activeDevices = [];
+let deviceStates = new Map();
 
-// 瀏覽器支援檢查
 if (!("hid" in navigator)) {
     document.getElementById('hid-btn').innerText = "⚠️ 不支援 WebHID";
     document.getElementById('hid-btn').disabled = true;
 } else {
-    // ★ 自動監聽：裝置插入或拔出 ★
     navigator.hid.addEventListener('connect', handleDeviceConnect);
     navigator.hid.addEventListener('disconnect', handleDeviceDisconnect);
-    
-    // ★ 頁面載入時，檢查是否有「已配對」的裝置 ★
-    // 這樣就可以跳過點擊按鈕的步驟
     checkPreviouslyPairedDevices();
 }
 
-// 檢查已配對裝置
 async function checkPreviouslyPairedDevices() {
     const devices = await navigator.hid.getDevices();
     const mb02Devices = devices.filter(d => d.vendorId === GRIP_VENDOR_ID && d.productId === GRIP_PRODUCT_ID);
-    
     if (mb02Devices.length > 0) {
-        console.log(`發現 ${mb02Devices.length} 個已配對裝置，自動連線...`);
-        for (let d of mb02Devices) {
-            await openDevice(d);
-        }
+        for (let d of mb02Devices) { await openDevice(d); }
     }
 }
 
-// 手動點擊配對
 async function requestNewDevice() {
     try {
         const devices = await navigator.hid.requestDevice({
             filters: [{ vendorId: GRIP_VENDOR_ID, productId: GRIP_PRODUCT_ID }]
         });
-        for (let d of devices) {
-            await openDevice(d);
-        }
+        for (let d of devices) { await openDevice(d); }
     } catch (err) { console.error("配對取消", err); }
 }
 
-// 事件：裝置插入
 function handleDeviceConnect(event) {
     const device = event.device;
     if (device.vendorId === GRIP_VENDOR_ID && device.productId === GRIP_PRODUCT_ID) {
-        console.log("偵測到 MB02 插入，嘗試連線...");
         openDevice(device);
     }
 }
 
-// 事件：裝置拔除
 function handleDeviceDisconnect(event) {
     const device = event.device;
-    console.log("裝置斷線:", device.productName);
-    
-    // 從清單移除
     activeDevices = activeDevices.filter(d => d !== device);
     deviceStates.delete(device);
-    
     updateUI();
 }
 
-// 開啟並初始化裝置
 async function openDevice(device) {
-    // 避免重複加入
     if (activeDevices.includes(device)) return;
-
     if (!device.opened) {
-        try {
-            await device.open();
-        } catch(e) {
-            console.error("無法開啟裝置 (可能被佔用)", e);
-            return;
-        }
+        try { await device.open(); } catch(e) { console.error(e); return; }
     }
-    
-    console.log("裝置已開啟:", device.productName);
     device.addEventListener("inputreport", handleInputReport);
-    
     activeDevices.push(device);
-    
-    // 初始化該裝置的體感變數
     deviceStates.set(device, { lastForce: 0, lastTime: 0 });
-    
     updateUI();
 }
 
-// 更新介面顯示
 function updateUI() {
     const p1Status = document.getElementById('led-p1');
     const p2Status = document.getElementById('led-p2');
     const btn = document.getElementById('start-btn');
     
-    // P1 狀態
     if (activeDevices.length > 0) {
         p1Status.classList.add('active');
         btn.disabled = false;
@@ -204,20 +163,14 @@ function updateUI() {
         btn.style.color = "#555";
     }
     
-    // P2 狀態
-    if (activeDevices.length > 1) {
-        p2Status.classList.add('active');
-    } else {
-        p2Status.classList.remove('active');
-    }
+    if (activeDevices.length > 1) p2Status.classList.add('active');
+    else p2Status.classList.remove('active');
 }
 
-// ★ 核心：多裝置輸入處理 ★
 function handleInputReport(event) {
     const { data, device } = event;
     if (data.byteLength < 32) return;
 
-    // 讀取加速度
     const ax = data.getFloat32(4, true);
     const ay = data.getFloat32(8, true);
     const az = data.getFloat32(12, true);
@@ -225,53 +178,50 @@ function handleInputReport(event) {
     const currentForce = Math.sqrt(ax*ax + ay*ay + az*az);
     const now = Date.now();
     
-    // 取得該裝置的歷史狀態
     let state = deviceStates.get(device);
     if (!state) return;
 
     const delta = Math.abs(currentForce - state.lastForce);
+    const playerIndex = activeDevices.indexOf(device); // 0 = P1, 1 = P2
     
-    // 判斷是 P1 還是 P2 (根據陣列順序)
-    const playerIndex = activeDevices.indexOf(device);
+    // Debug Display
     const debugId = playerIndex === 0 ? 'debug-p1' : (playerIndex === 1 ? 'debug-p2' : null);
-    
-    // 顯示數值
-    if (debugId) {
-        document.getElementById(debugId).innerText = `G: ${delta.toFixed(1)}`;
-    }
+    if (debugId) document.getElementById(debugId).innerText = `G: ${delta.toFixed(1)}`;
 
-    // 觸發判定
+    // Trigger
     if (delta > PUNCH_THRESHOLD && (now - state.lastTime > PUNCH_COOLDOWN)) {
-        
-        // 視覺回饋
         if (debugId) {
             document.getElementById(debugId).style.color = "#fff";
             setTimeout(() => document.getElementById(debugId).style.color = "#555", 100);
         }
 
-        // 遊戲動作
-        if (gameState === 1) {
-            triggerPlayerAction();
-        }
+        // ★ 呼叫動作，並傳入玩家編號 (1 or 2) 以便做 Panning ★
+        triggerPlayerAction(playerIndex + 1);
         
         state.lastTime = now;
     }
-    
     state.lastForce = currentForce;
 }
 
-// 統一觸發
-function triggerPlayerAction() {
+// 統一觸發 (接收玩家編號 1 或 2)
+function triggerPlayerAction(playerNum) {
+    // ★ 關鍵修正：只有在遊戲進行中 (gameState 1) 才允許跳躍和發聲 ★
+    // 這樣倒數時 (gameState 4) 握力球就會被靜音
+    if (gameState !== 1) return;
+
     if (!squid) return;
     let power = random(0.6, 0.9);
     squid.jump(power);
-    playJumpSound(power);
+    
+    // 播放帶有 Panning 的音效
+    playJumpSound(power, playerNum);
 }
 
 // ==========================================
-//  PART 1: 聲音系統 (修正倒數 + Square Tone)
+//  PART 1: 聲音系統 (立體聲 + 方波珍珠)
 // ==========================================
-let jumpSynth, fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, victorySynth, dieSynth;
+let jumpSynthP1, jumpSynthP2; // 分離的跳躍合成器
+let fallSynth, collectSynth, collisionSynth, levelUpSynth, jackpotSynth, victorySynth, dieSynth;
 let ambientNoise;
 let pearlSynths = []; let pearlSynthIndex = 0;
 let isAudioReady = false; let audioInitStarted = false;
@@ -290,8 +240,21 @@ async function initAudio(startNow = true) {
         if (Tone.context.state !== 'running') await Tone.context.resume();
         Tone.Destination.volume.value = 0;
 
-        jumpSynth = new Tone.Synth({ oscillator: { type: "sine" }, envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 } }).toDestination();
-        jumpSynth.volume.value = -2;
+        // ★ P1 (左) 跳躍音效 ★
+        const panner1 = new Tone.Panner(-0.8).toDestination();
+        jumpSynthP1 = new Tone.Synth({
+            oscillator: { type: "sine" },
+            envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 }
+        }).connect(panner1);
+        jumpSynthP1.volume.value = -2;
+
+        // ★ P2 (右) 跳躍音效 ★
+        const panner2 = new Tone.Panner(0.8).toDestination();
+        jumpSynthP2 = new Tone.Synth({
+            oscillator: { type: "sine" },
+            envelope: { attack: 0.02, decay: 0.3, sustain: 0, release: 0.5 }
+        }).connect(panner2);
+        jumpSynthP2.volume.value = -2;
 
         fallSynth = new Tone.Synth({ oscillator: { type: "sine" }, envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.1 } }).toDestination();
         fallSynth.volume.value = -5;
@@ -302,13 +265,13 @@ async function initAudio(startNow = true) {
         }
         
         levelUpSynth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "sawtooth" }, envelope: { attack: 0.05, decay: 0.5, sustain: 0.3, release: 1.5 } }).toDestination();
-        levelUpSynth.volume.value = -8; 
+        levelUpSynth.volume.value = -8;
 
         jackpotSynth = new Tone.Synth({ oscillator: { type: "square" }, envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.1 } }).toDestination();
-        jackpotSynth.volume.value = -10; 
+        jackpotSynth.volume.value = -10;
 
         victorySynth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "fatsawtooth", count: 3, spread: 30 }, envelope: { attack: 0.1, decay: 0.5, sustain: 1.0, release: 4.0 } }).toDestination();
-        victorySynth.volume.value = -15; 
+        victorySynth.volume.value = -15;
 
         collisionSynth = new Tone.FMSynth({ harmonicity: 3.0, modulationIndex: 10, oscillator: { type: "sine" }, modulation: { type: "square" }, envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 }, modulationEnvelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 } }).toDestination();
         collisionSynth.volume.value = -2;
@@ -320,6 +283,10 @@ async function initAudio(startNow = true) {
         ambientNoise = new Tone.Noise("brown").connect(filter);
         ambientNoise.volume.value = -22; ambientNoise.start();
 
+        // 倒數音效使用其中一個 synth 即可 (例如 P1 的，但設為中間)
+        // 為了簡單，我們直接用 jumpSynthP1 發聲，或者額外宣告一個 countdown synth
+        // 這裡直接借用 fallSynth 來發倒數音，因為它是單聲道且在中間 (預設)
+        
         isAudioReady = true;
         
         if(startNow) {
@@ -332,24 +299,39 @@ async function initAudio(startNow = true) {
     } catch (e) { console.error("Audio Init Error:", e); }
 }
 
-function playJumpSound(power) {
+function playJumpSound(power, playerNum) {
     if (!isAudioReady) return;
     stopFallingSequence();
     let pitch = map(power, 0.0, 1.0, 300, 700);
     lastJumpPitch = pitch;
-    if (squid && squid.evolutionLevel >= 5) { jumpSynth.oscillator.type = "square"; jumpSynth.volume.value = -12; } 
-    else { jumpSynth.oscillator.type = "sine"; jumpSynth.volume.value = -2; }
-    try { jumpSynth.triggerAttackRelease(pitch, "8n"); } catch(e){}
+    
+    // 根據玩家選擇發聲器
+    let targetSynth;
+    if (playerNum === 2) targetSynth = jumpSynthP2;
+    else targetSynth = jumpSynthP1; // 預設 P1 (左/中)
+
+    if (squid && squid.evolutionLevel >= 5) {
+        targetSynth.oscillator.type = "square"; targetSynth.volume.value = -12;
+    } else {
+        targetSynth.oscillator.type = "sine"; targetSynth.volume.value = -2;
+    }
+    
+    try { targetSynth.triggerAttackRelease(pitch, "8n"); } catch(e){}
 }
 
 function playCountdownBeep(pitch) {
     if (!isAudioReady) return;
-    try { jumpSynth.oscillator.type = "sine"; jumpSynth.volume.value = -5; jumpSynth.triggerAttackRelease(pitch, "32n"); } catch(e){}
+    // 使用 fallSynth 代替倒數音 (確保置中)
+    try {
+        fallSynth.oscillator.type = "sine";
+        fallSynth.volume.value = -5;
+        fallSynth.triggerAttackRelease(pitch, "32n");
+    } catch(e){}
 }
 
 function playCollectSound(comboIndex) {
     if (!isAudioReady) return;
-    let index = (comboIndex % 10); 
+    let index = (comboIndex % 10);
     try { pearlSynths[pearlSynthIndex].triggerAttackRelease(noteMap[index], "32n"); pearlSynthIndex = (pearlSynthIndex + 1) % pearlSynths.length; } catch(e){}
 }
 
@@ -369,14 +351,16 @@ function playDieSound() { if (!isAudioReady) return; try { dieSynth.triggerAttac
 function startFallingSequence() {
     if (!isAudioReady || isFallingSoundPlaying) return;
     isFallingSoundPlaying = true;
-    let currentPitch = lastJumpPitch; let currentGap = 0.15; let currentVol = -5;     
-    if (squid && squid.evolutionLevel >= 5) { fallSynth.oscillator.type = "square"; fallSynth.volume.value = -12; } 
-    else { fallSynth.oscillator.type = "sine"; fallSynth.volume.value = -5; }
+    let currentPitch = lastJumpPitch; let currentGap = 0.15; let currentVol = -5;
+    // 掉落音效統一用 fallSynth (置中)
+    fallSynth.oscillator.type = (squid && squid.evolutionLevel >= 5) ? "square" : "sine";
+    fallSynth.volume.value = (squid && squid.evolutionLevel >= 5) ? -12 : -5;
+
     function playBeat() {
         if (!isFallingSoundPlaying) return;
         let now = Tone.now();
         try { fallSynth.triggerAttackRelease(currentPitch, currentGap * 0.8, now, Tone.dbToGain(currentVol)); } catch(e){}
-        currentPitch *= 0.85; currentGap *= 0.8; currentVol -= 2;      
+        currentPitch *= 0.85; currentGap *= 0.8; currentVol -= 2;
         if (currentPitch > 50 && currentGap > 0.02) { fallTimeoutID = setTimeout(playBeat, currentGap * 1000); } else { isFallingSoundPlaying = false; }
     }
     playBeat();
@@ -384,37 +368,36 @@ function startFallingSequence() {
 function stopFallingSequence() { isFallingSoundPlaying = false; if (fallTimeoutID) { clearTimeout(fallTimeoutID); fallTimeoutID = null; } }
 
 // ==========================================
-//  PART 2: 遊戲邏輯 (累積進化 + 防卡死)
+//  PART 2: 遊戲邏輯 (累積計數 + 防卡死)
 // ==========================================
 let squid;
-let particles = []; let stars = []; let terrain; let pearls = []; 
-let gameState = 0; let score = 0; let gameSpeed = 3; let shakeAmount = 0; let canRestart = false; 
-let comboCount = 0; let comboTimer = 0; let totalPearls = 0; 
-const COMBO_TIME_LIMIT = 300; const VICTORY_PEARLS = 60; 
+let particles = []; let stars = []; let terrain; let pearls = [];
+let gameState = 0; let score = 0; let gameSpeed = 3; let shakeAmount = 0; let canRestart = false;
+let comboCount = 0; let comboTimer = 0; let totalPearls = 0;
+const COMBO_TIME_LIMIT = 300; const VICTORY_PEARLS = 60;
 let startCountdownTimer = 0;
 
 function setup() {
     createCanvas(windowWidth, windowHeight);
-    squid = new TechSquid(width * 0.25, height/2); 
+    squid = new TechSquid(width * 0.25, height/2);
     terrain = new CaveTerrain();
     
-    // 綁定 Start 按鈕 (同時觸發音效和倒數)
     document.getElementById('start-btn').onclick = () => initAudio(true);
-    document.getElementById('hid-btn').onclick = requestNewDevice; // 手動配對
-    noLoop(); 
+    document.getElementById('hid-btn').onclick = requestNewDevice;
+    noLoop();
 }
 
 function startCountdown() {
     if (!squid) squid = new TechSquid(width * 0.25, height/2);
     else {
         squid.reset(width * 0.25, height/2);
-        squid.evolutionLevel = 0; 
+        squid.evolutionLevel = 0;
         squid.updateColorByLevel();
         squid.size = 60;
     }
     terrain.reset(true); pearls = []; particles = []; stars = [];
-    score = 0; comboCount = 0; totalPearls = 0; 
-    gameState = 4; startCountdownTimer = 180; 
+    score = 0; comboCount = 0; totalPearls = 0;
+    gameState = 4; startCountdownTimer = 180;
     updateHPDisplay(); loop();
 }
 
@@ -423,7 +406,7 @@ function startGame() { gameState = 1; score = 0; gameSpeed = 3.5; updateHPDispla
 function updateHPDisplay() {
     let hp = squid.hp;
     let hpElement = document.getElementById('hp-bar');
-    let heartSymbol = "❤"; let color = "#ff5555"; 
+    let heartSymbol = "❤"; let color = "#ff5555";
     if (hp > 20) { heartSymbol = "👑"; color = "#ffd700"; }
     else if (hp > 10) { heartSymbol = "💛"; color = "#ffff00"; }
     else if (hp > 5) { heartSymbol = "💙"; color = "#00ffff"; }
@@ -473,21 +456,22 @@ function draw() {
         terrain.display(); squid.display();
         startCountdownTimer--;
         let seconds = ceil(startCountdownTimer / 60);
-        // ★ 修正：倒數音效完全一致 (C5)，GO 是 C6 ★
+        // ★ 倒數音 (3,2,1 C5 / GO C6)
         if (startCountdownTimer % 60 === 0 && startCountdownTimer > 0) playCountdownBeep("C5");
-        if (startCountdownTimer === 0) playCountdownBeep("C6"); 
+        if (startCountdownTimer === 0) playCountdownBeep("C6");
+        
         textAlign(CENTER, CENTER); textStyle(BOLD); textSize(150);
-        if (startCountdownTimer > 0) { fill(255); text(seconds, width/2, height/2); } 
+        if (startCountdownTimer > 0) { fill(255); text(seconds, width/2, height/2); }
         else { fill(0, 255, 255); text("GO!", width/2, height/2); }
         if (startCountdownTimer < -30) startGame();
 
     } else if (gameState === 1) {
-        gameSpeed += 0.0002; 
+        gameSpeed += 0.0002;
         
         let hasPearlOnScreen = pearls.some(p => p.pos.x > 0 && p.pos.x < width);
         if (comboCount > 0) {
             if (hasPearlOnScreen) comboTimer--;
-            if (comboTimer <= 0) comboCount = 0; 
+            if (comboTimer <= 0) comboCount = 0;
         }
         
         terrain.update(); terrain.display();
@@ -500,7 +484,7 @@ function draw() {
             p.update(); p.display();
             
             if (p.hits(squid)) {
-                comboCount++; totalPearls++; comboTimer = COMBO_TIME_LIMIT; score += 100 + (comboCount * 50); 
+                comboCount++; totalPearls++; comboTimer = COMBO_TIME_LIMIT; score += 100 + (comboCount * 50);
                 
                 let potentialLevel = floor(totalPearls / 10);
                 if (potentialLevel <= 5 && potentialLevel > squid.evolutionLevel) {
@@ -539,15 +523,14 @@ function draw() {
         let obstacleHit = terrain.checkObstacleCollision(squid);
 
         if (collision.hit || obstacleHit) {
-            // ★ 防卡死彈出機制 ★
-            squid.vel.x = -15; // 向左彈
-            if(squid.pos.y < height/2) squid.vel.y = 5; // 在上半部就向下彈
-            else squid.vel.y = -5; // 在下半部就向上彈
+            // ★ 強力反彈 (Anti-Stuck) ★
+            squid.vel.x = -15;
+            if(squid.pos.y < height/2) squid.vel.y = 5; else squid.vel.y = -5;
 
             if (!squid.isInvincible) {
                 squid.takeDamage(); comboCount = 0; shakeAmount = 20;
                 playCollisionSound(); updateHPDisplay();
-                if (squid.hp <= 0) triggerDeath(); 
+                if (squid.hp <= 0) triggerDeath();
             }
         }
         document.getElementById('score-val').innerText = score;
@@ -578,9 +561,9 @@ function draw() {
     if (gameState === 1 && comboCount > 0) {
         let barWidth = map(comboTimer, 0, COMBO_TIME_LIMIT, 0, 200);
         let hasPearlOnScreen = pearls.some(p => p.pos.x > 0 && p.pos.x < width);
-        noStroke(); 
-        if (hasPearlOnScreen) fill(255, 255, 0, 200); else fill(255, 255, 255, 100); 
-        rect(width/2 - 100, 80, barWidth, 10, 5); 
+        noStroke();
+        if (hasPearlOnScreen) fill(255, 255, 0, 200); else fill(255, 255, 255, 100);
+        rect(width/2 - 100, 80, barWidth, 10, 5);
     }
     pop();
 }
@@ -588,19 +571,19 @@ function draw() {
 function screenPosition(x, y) { return x; }
 
 function triggerDeath() {
-    gameState = 2; stopFallingSequence(); playDieSound(); squid.explode(); 
+    gameState = 2; stopFallingSequence(); playDieSound(); squid.explode();
     for(let k=0; k<20; k++) { let b = new Bubble(squid.pos.x, squid.pos.y, true); b.vel = p5.Vector.random2D().mult(random(5, 10)); particles.push(b); }
-    canRestart = false; setTimeout(() => { canRestart = true; }, 1500); 
+    canRestart = false; setTimeout(() => { canRestart = true; }, 1500);
 }
 
 function triggerVictory() {
     gameState = 3; stopFallingSequence(); playVictorySound();
-    canRestart = false; setTimeout(() => { canRestart = true; }, 4000); 
+    canRestart = false; setTimeout(() => { canRestart = true; }, 4000);
 }
 
 function handleInput(e) {
-    if(e && e.cancelable) e.preventDefault(); 
-    if (gameState === 1) { triggerPlayerAction(); } 
+    if(e && e.cancelable) e.preventDefault();
+    if (gameState === 1) { triggerPlayerAction(1); } // 滑鼠預設 P1
     else if ((gameState === 2 || gameState === 3) && canRestart) { squid.evolutionLevel = 0; startCountdown(); }
     return false;
 }
@@ -626,17 +609,17 @@ class CaveObstacle {
         this.pupilOffsetRight = createVector(random(-1, 1), random(-1, 1));
     }
     update() {
-        this.pos.x -= gameSpeed; this.timer += 0.05; 
+        this.pos.x -= gameSpeed; this.timer += 0.05;
         if(frameCount % 20 === 0) { this.pupilOffsetLeft = createVector(random(-1, 1), random(-1, 1)); this.pupilOffsetRight = createVector(random(-1, 1), random(-1, 1)); }
     }
     display() {
         push(); translate(this.pos.x, this.pos.y);
         if (this.type === 'starfish') {
-            rotate(this.angle + this.timer * 0.5); noStroke(); fill(255, 100, 100); 
+            rotate(this.angle + this.timer * 0.5); noStroke(); fill(255, 100, 100);
             beginShape(); for (let i = 0; i < 5; i++) { let a = TWO_PI * i / 5 - HALF_PI; let r = this.size / 2; vertex(cos(a) * r, sin(a) * r); a += TWO_PI / 10; vertex(cos(a) * r * 0.4, sin(a) * r * 0.4); } endShape(CLOSE); fill(255, 200); ellipse(0, 0, 5, 5);
         } else if (this.type === 'eel') {
             let sway = sin(this.timer) * 15; let dir = (this.side === 'top') ? 1 : -1;
-            noFill(); stroke(240); strokeWeight(14); 
+            noFill(); stroke(240); strokeWeight(14);
             beginShape(); vertex(0, 0); bezierVertex(0, 20*dir, sway, 40*dir, sway*0.5, 70*dir); endShape();
             noStroke(); fill(50); ellipse(0, 15*dir, 5, 5); ellipse(sway*0.3, 40*dir, 5, 5);
             fill(240); let headX = sway*0.5; let headY = 70*dir; ellipse(headX, headY, 20, 24);
@@ -655,23 +638,23 @@ class CaveObstacle {
 class CaveTerrain {
     constructor() { this.reset(true); }
     reset(randomize = false) {
-        if(randomize) this.noiseOffset = random(10000); else this.noiseOffset = 0; 
-        this.segments = []; this.obstacles = []; 
+        if(randomize) this.noiseOffset = random(10000); else this.noiseOffset = 0;
+        this.segments = []; this.obstacles = [];
         for(let x=0; x<=width; x+=10) this.addSegment(x);
     }
     addSegment(x) {
         let h = this.generateHeight(x); this.segments.push(h);
-        if (random() < 0.05 && x > 400) { 
+        if (random() < 0.05 && x > 400) {
             let type = random() < 0.5 ? 'starfish' : 'eel'; let side = random() < 0.5 ? 'top' : 'bottom';
-            let y = (side === 'top') ? h.top : h.bottom; let offset = (side === 'top') ? -10 : 10; if (type === 'eel') offset = 0; 
+            let y = (side === 'top') ? h.top : h.bottom; let offset = (side === 'top') ? -10 : 10; if (type === 'eel') offset = 0;
             this.obstacles.push(new CaveObstacle(x, y + offset, type, side));
         }
     }
     generateHeight(x) {
         if (x < 400) { return { x: x, top: height * 0.2, bottom: height * 0.8 }; }
-        let n = noise(this.noiseOffset); this.noiseOffset += 0.02; 
-        let gapSize = map(n, 0, 1, 450, 650); 
-        let center = map(noise(this.noiseOffset * 0.5 + 100), 0, 1, 50, height-50); 
+        let n = noise(this.noiseOffset); this.noiseOffset += 0.02;
+        let gapSize = map(n, 0, 1, 450, 650);
+        let center = map(noise(this.noiseOffset * 0.5 + 100), 0, 1, 50, height-50);
         return { x: x, top: center - gapSize/2, bottom: center + gapSize/2 };
     }
     update() {
@@ -685,7 +668,7 @@ class CaveTerrain {
         }
     }
     display() {
-        fill(20, 30, 40); stroke(0, 255, 255, 50); 
+        fill(20, 30, 40); stroke(0, 255, 255, 50);
         beginShape(); vertex(0, 0); for (let s of this.segments) vertex(s.x, s.top); vertex(width, 0); endShape(CLOSE);
         beginShape(); vertex(0, height); for (let s of this.segments) vertex(s.x, s.bottom); vertex(width, height); endShape(CLOSE);
         for (let o of this.obstacles) o.display();
@@ -720,10 +703,10 @@ class TechSquid {
     reset(x, y) {
         this.pos = createVector(x, y); this.vel = createVector(0, 0); this.gravity = 0.35; this.drag = 0.95;
         this.bodyColor = this.baseColor; this.squish = 1.0; this.tentaclePhase = 0; this.eyeSize = 15;
-        this.hp = 3; this.invincibleTimer = 0; this.isInvincible = false; this.evolutionLevel = 0; 
+        this.hp = 3; this.invincibleTimer = 0; this.isInvincible = false; this.evolutionLevel = 0;
     }
     setEvolution(level) {
-        this.evolutionLevel = level; 
+        this.evolutionLevel = level;
         this.size = 60 + (min(level, 5) * 5);
     }
     evolveNext() { this.setEvolution(min(this.evolutionLevel + 1, 5)); }
@@ -737,12 +720,12 @@ class TechSquid {
         this.vel.y += this.gravity; this.pos.add(this.vel); this.tentaclePhase += 0.05; this.vel.x *= 0.99; this.pos.x += this.vel.x;
     }
     updateColorByLevel() {
-        if (this.evolutionLevel >= 5) this.bodyColor = color(255, 215, 0); 
-        else if (this.evolutionLevel === 4) this.bodyColor = color(50, 50, 100); 
-        else if (this.evolutionLevel === 3) this.bodyColor = color(100, 200, 100); 
-        else if (this.evolutionLevel === 2) this.bodyColor = color(200, 200, 255); 
-        else if (this.evolutionLevel === 1) this.bodyColor = color(255, 150, 150); 
-        else this.bodyColor = this.baseColor; 
+        if (this.evolutionLevel >= 5) this.bodyColor = color(255, 215, 0);
+        else if (this.evolutionLevel === 4) this.bodyColor = color(50, 50, 100);
+        else if (this.evolutionLevel === 3) this.bodyColor = color(100, 200, 100);
+        else if (this.evolutionLevel === 2) this.bodyColor = color(200, 200, 255);
+        else if (this.evolutionLevel === 1) this.bodyColor = color(255, 150, 150);
+        else this.bodyColor = this.baseColor;
     }
     update() {
         this.vel.y += this.gravity; this.vel.mult(this.drag); this.pos.add(this.vel);
@@ -751,7 +734,7 @@ class TechSquid {
             this.invincibleTimer--;
             if (frameCount % 10 < 5) this.bodyColor = color(255, 100, 100, 150); else this.updateColorByLevel();
             if (this.invincibleTimer <= 0) { this.isInvincible = false; this.updateColorByLevel(); }
-        } else { 
+        } else {
             if(this.evolutionLevel >= 5) this.bodyColor = lerpColor(color(255, 215, 0), color(255, 255, 100), sin(frameCount*0.2)*0.5 + 0.5);
             else this.updateColorByLevel();
         }
@@ -764,36 +747,36 @@ class TechSquid {
         push(); translate(this.pos.x, this.pos.y);
         if (gameState === 2) rotate(frameCount * 0.2); else rotate(this.vel.y * 0.02);
         scale(1, this.squish);
-        let level = this.evolutionLevel; if (level > 5) level = 5; 
+        let level = this.evolutionLevel; if (level > 5) level = 5;
         switch(level) {
             case 0: this.drawSquid(); break; case 1: this.drawCuttlefish(); break; case 2: this.drawJellyfish(); break;
             case 3: this.drawSeahorse(); break; case 4: this.drawAnglerfish(); break; case 5: this.drawGoldenSquid(); break;
-            default: this.drawSquid(); 
+            default: this.drawSquid();
         }
         if (level >= 5) { noFill(); stroke(255, 215, 0, 100); strokeWeight(2); let aura = 80 + sin(frameCount * 0.2) * 10; ellipse(0, 0, aura, aura); }
         pop();
     }
-    drawSquid() { 
+    drawSquid() {
         noFill(); strokeWeight(4); for(let i=-2; i<=2; i++) { stroke(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 200); beginShape(); for(let j=0; j<8; j++) { let wave = sin(this.tentaclePhase + i + j*0.5) * j*1.5; vertex(i*10 + wave, 30 + j*8); } endShape(); }
         noStroke(); fill(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 150); arc(0, 0, this.size*1.8, this.size*1.8, PI, TWO_PI); rect(-this.size*0.9, 0, this.size*1.8, 10); this.drawEyes(-20, -10);
     }
-    drawCuttlefish() { 
+    drawCuttlefish() {
         noFill(); strokeWeight(4); for(let i=-1; i<=1; i++) { stroke(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 200); line(i*10, 40, i*15, 70); }
         noStroke(); fill(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 150); beginShape(); vertex(0, -50); vertex(30, 0); vertex(0, 50); vertex(-30, 0); endShape(CLOSE); this.drawEyes(-15, -10);
     }
-    drawJellyfish() { 
+    drawJellyfish() {
         noFill(); strokeWeight(2); for(let i=-3; i<=3; i++) { stroke(255, 100); let wave = sin(this.tentaclePhase + i*0.5 + frameCount*0.1) * 10; line(i*8, 10, i*10 + wave, 60); }
         noStroke(); fill(200, 200, 255, 100); arc(0, 0, 60, 50, PI, TWO_PI); this.drawEyes(-15, -10);
     }
-    drawSeahorse() { 
+    drawSeahorse() {
         noFill(); stroke(this.bodyColor); strokeWeight(18); beginShape(); vertex(0, -35); bezierVertex(20, -35, 25, -10, 5, 10); bezierVertex(-25, 25, -25, 50, 15, 60); endShape();
         strokeWeight(8); line(0, -30, -25, -25); noStroke(); fill(red(this.bodyColor), green(this.bodyColor), blue(this.bodyColor), 150); triangle(-10, 0, -25, 10, -10, 20); this.drawEyes(5, -25);
     }
-    drawAnglerfish() { 
-        stroke(255); strokeWeight(2); noFill(); beginShape(); vertex(0, -25); bezierVertex(10, -40, 20, -40, 35, -20); endShape(); noStroke(); fill(255, 255, 0); ellipse(35, -20, 15); fill(255, 255, 0, 100); ellipse(35, -20, 30); 
+    drawAnglerfish() {
+        stroke(255); strokeWeight(2); noFill(); beginShape(); vertex(0, -25); bezierVertex(10, -40, 20, -40, 35, -20); endShape(); noStroke(); fill(255, 255, 0); ellipse(35, -20, 15); fill(255, 255, 0, 100); ellipse(35, -20, 30);
         fill(this.bodyColor); ellipse(0, 0, 80, 70); fill(this.bodyColor); arc(0, 20, 70, 40, 0, PI); fill(255); triangle(-20, 25, -15, 45, -10, 25); triangle(10, 25, 15, 45, 20, 25); triangle(0, 25, 5, 40, 10, 25); this.drawEyes(-15, -10);
     }
-    drawGoldenSquid() { 
+    drawGoldenSquid() {
         this.drawSquid(); fill(0); noStroke(); rect(-35, -15, 30, 15, 2); rect(5, -15, 30, 15, 2); rect(-5, -10, 10, 3); fill(255, 100); rect(-30, -12, 10, 5); rect(10, -12, 10, 5); fill(255, 215, 0); stroke(255); strokeWeight(2); beginShape(); vertex(-20, -35); vertex(-10, -50); vertex(0, -35); vertex(10, -50); vertex(20, -35); endShape(CLOSE);
     }
     drawEyes(x, y) { fill(255); noStroke(); ellipse(x, y, this.eyeSize+5); ellipse(-x, y, this.eyeSize+5); fill(0); ellipse(x, y + this.vel.y*0.2, 5); ellipse(-x, y + this.vel.y*0.2, 5); }
