@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Squid - ACC Punch</title>
+  <title>Cyber Squid - Dual HID</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
@@ -34,7 +34,9 @@
 
     #hid-status {
         margin-top: 15px; font-size: 14px; color: #888;
-        display: flex; align-items: center; gap: 10px; flex-direction: column;
+        display: flex; align-items: center; gap: 5px; flex-direction: column;
+        background: rgba(0,0,0,0.5); padding: 10px; border-radius: 10px;
+        min-width: 250px;
     }
     
     #hud {
@@ -84,7 +86,7 @@
 
   <div id="overlay">
     <h1 style="text-shadow: 0 0 20px #0ff; font-size: 50px; margin-bottom: 0;">深海烏賊</h1>
-    <p style="color: #0aa; font-size: 20px;">體感揮拳控制版</p>
+    <p style="color: #0aa; font-size: 20px;">雙人握力球版 (WebHID)</p>
     
     <div class="btn-group">
         <button id="hid-btn">🔵 連接握力球</button>
@@ -92,14 +94,20 @@
     </div>
     
     <div id="hid-status">
-        <span id="p1-status" style="color: #888;">P1: 未連接</span>
-        <span id="data-debug" style="color: #555; font-size: 12px; margin-top:5px;">G-Force: 0.0</span>
+        <div id="p1-area" style="width: 100%; display: flex; justify-content: space-between;">
+            <span style="color: #888;">P1: 未連接</span>
+            <span id="p1-debug" style="color: #555; font-family: monospace;">Step: --</span>
+        </div>
+        <div id="p2-area" style="width: 100%; display: flex; justify-content: space-between; border-top: 1px solid #333; padding-top: 5px;">
+            <span style="color: #888;">P2: 未連接</span>
+            <span id="p2-debug" style="color: #555; font-family: monospace;">Step: --</span>
+        </div>
     </div>
   </div>
 
 <script>
 // ==========================================
-//  PART 0: WebHID 體感演算法 (Acc Punch)
+//  PART 0: WebHID 雙球連接系統 (Dual Steps)
 // ==========================================
 const GRIP_VENDOR_ID = 0x08E2;
 const GRIP_PRODUCT_ID = 0x0101;
@@ -107,98 +115,114 @@ const GRIP_PRODUCT_ID = 0x0101;
 let player1Device = null;
 let player2Device = null;
 
-// ★ 體感參數設定 ★
-// 閾值：如果數值太容易觸發，把這個調大 (例如 8.0)
-// 如果太難觸發，調小 (例如 3.0)
-// 根據您的硬體單位，通常重力是 9.8 或 1.0，這邊假設是原始單位
-const PUNCH_THRESHOLD = 5.0;
-const PUNCH_COOLDOWN = 150; // 毫秒，防止一次揮動觸發兩次
-
-let lastForce = 0;
-let lastTriggerTime = 0;
+// 分別記錄兩顆球的狀態，互不干擾
+let p1LastSteps = -1;
+let p2LastSteps = -1;
 
 // 檢查瀏覽器支援
 if (!("hid" in navigator)) {
-    document.getElementById('hid-status').innerText = "⚠️ 您的瀏覽器不支援 WebHID (請用 Chrome/Edge)";
+    document.querySelector('#hid-status span').innerText = "⚠️ 瀏覽器不支援 WebHID (請用 Chrome PC版)";
 }
 
 async function connectHID() {
     try {
+        // 請求裝置 (過濾特定的 VID/PID)
         const devices = await navigator.hid.requestDevice({
             filters: [{ vendorId: GRIP_VENDOR_ID, productId: GRIP_PRODUCT_ID }]
         });
 
-        if (devices.length === 0) { console.log("未選擇裝置"); return; }
+        if (devices.length === 0) {
+            console.log("未選擇裝置");
+            return;
+        }
 
-        for (let device of devices) { await openDevice(device); }
+        // 處理所有選取的裝置
+        for (let device of devices) {
+            await openDevice(device);
+        }
 
-    } catch (err) { console.error("HID Error:", err); }
+    } catch (err) {
+        console.error("HID Error:", err);
+    }
 }
 
 async function openDevice(device) {
-    if (!device.opened) { await device.open(); }
+    if (!device.opened) {
+        await device.open();
+    }
+    
+    // 綁定輸入監聽 (核心邏輯)
     device.addEventListener("inputreport", handleInputReport);
     
+    // 自動分配 P1 或 P2
     if (!player1Device) {
         player1Device = device;
-        updateStatus("p1", `P1 已連線: 體感模式 Ready`, "#0f0");
+        updateStatusUI("p1", `P1: ${device.productName}`, "#0f0");
         document.getElementById('hid-btn').innerText = "連接第二顆";
-    } else if (player1Device !== device && !player2Device) {
+    }
+    // 如果不是 P1 (避免重複)，且 P2 還沒連
+    else if (device !== player1Device && !player2Device) {
         player2Device = device;
-        updateStatus("p2", `P2 已連線`, "#0f0");
+        updateStatusUI("p2", `P2: ${device.productName}`, "#0f0");
         document.getElementById('hid-btn').innerText = "裝置已滿";
         document.getElementById('hid-btn').disabled = true;
     }
 }
 
-function updateStatus(id, text, color) {
-    const el = document.getElementById(id + '-status');
-    el.innerText = text; el.style.color = color;
+function updateStatusUI(player, text, color) {
+    // 透過 selector 找到對應的 span
+    const area = document.getElementById(player + '-area');
+    const label = area.querySelector('span:first-child');
+    label.innerText = text;
+    label.style.color = color;
 }
 
-// ★ 核心：揮拳演算法 ★
+// ★ 核心：雙裝置解析 ★
 function handleInputReport(event) {
     const { data, device } = event;
-    // Python Struct: <LffffffL (Time, AccX, AccY, AccZ, GyrX, GyrY, GyrZ, Steps)
-    // 我們需要 AccX (offset 4), AccY (offset 8), AccZ (offset 12)
     
+    // 確保資料長度足夠 (Steps 在 offset 28)
     if (data.byteLength < 32) return;
 
-    if (device === player1Device) {
-        // 讀取加速度 (Float32 Little Endian)
-        const ax = data.getFloat32(4, true);
-        const ay = data.getFloat32(8, true);
-        const az = data.getFloat32(12, true);
-        
-        // 1. 計算總合力 (Magnitude)
-        // 這樣不管往哪個方向揮，都能偵測到
-        const currentForce = Math.sqrt(ax*ax + ay*ay + az*az);
-        
-        // 2. 計算變化量 (Delta)
-        // 減去上一次的力道，可以濾除地心引力 (因為地心引力是常數)
-        const delta = Math.abs(currentForce - lastForce);
-        
-        // 更新 Debug 顯示
-        document.getElementById('data-debug').innerText = `Force: ${delta.toFixed(2)}`;
+    // 讀取目前的步數
+    const currentSteps = data.getUint32(28, true);
 
-        // 3. 判定觸發
-        const now = Date.now();
-        if (delta > PUNCH_THRESHOLD && (now - lastTriggerTime > PUNCH_COOLDOWN)) {
-            // 觸發！
+    // --- P1 邏輯 ---
+    if (device === player1Device) {
+        document.getElementById('p1-debug').innerText = `Step: ${currentSteps}`;
+        
+        // 第一次連線不觸發
+        if (p1LastSteps !== -1 && currentSteps > p1LastSteps) {
+            if (gameState === 1) { // 遊戲中才跳
+                triggerPlayerAction();
+                highlightDebug("p1");
+            }
+        }
+        p1LastSteps = currentSteps;
+    }
+    
+    // --- P2 邏輯 (完全複製 P1，但變數獨立) ---
+    else if (device === player2Device) {
+        document.getElementById('p2-debug').innerText = `Step: ${currentSteps}`;
+        
+        if (p2LastSteps !== -1 && currentSteps > p2LastSteps) {
             if (gameState === 1) {
                 triggerPlayerAction();
-                // 視覺回饋：讓 Debug 文字閃一下
-                document.getElementById('data-debug').style.color = "#fff";
-                setTimeout(()=>document.getElementById('data-debug').style.color = "#555", 100);
+                highlightDebug("p2");
             }
-            lastTriggerTime = now;
         }
-        
-        lastForce = currentForce;
+        p2LastSteps = currentSteps;
     }
 }
 
-// 統一觸發動作
+// 視覺回饋：讓數值閃一下白色
+function highlightDebug(player) {
+    const el = document.getElementById(player + '-debug');
+    el.style.color = "#fff";
+    setTimeout(() => el.style.color = "#555", 100);
+}
+
+// 統一觸發動作 (無論 P1 或 P2 握壓，都呼叫這個)
 function triggerPlayerAction() {
     if (!squid) return;
     let power = random(0.6, 0.9);
@@ -320,7 +344,7 @@ function startFallingSequence() {
 function stopFallingSequence() { isFallingSoundPlaying = false; if (fallTimeoutID) { clearTimeout(fallTimeoutID); fallTimeoutID = null; } }
 
 // ==========================================
-//  PART 2: 遊戲邏輯
+//  PART 2: 遊戲邏輯 (累積計數)
 // ==========================================
 let squid;
 let particles = []; let stars = []; let terrain; let pearls = [];
@@ -552,7 +576,7 @@ function drawBackground() {
 }
 
 // ==========================================
-//  PART 3: 類別
+//  PART 3: 類別 (保持不變)
 // ==========================================
 class CaveObstacle {
     constructor(x, y, type, side) {
