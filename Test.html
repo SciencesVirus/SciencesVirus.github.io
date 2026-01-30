@@ -110,57 +110,59 @@
 // ==========================================
 //  PART 0: 雙模體感演算法 (WebHID / BLE 自動切換)
 // ==========================================
+// ==========================================
+//  PART 0: 系統初始化 (修正 Android 偵測)
+// ==========================================
 const GRIP_VENDOR_ID = 0x08E2;
 const GRIP_PRODUCT_ID = 0x0101;
-
-// ★ BLE 專用配置 (需根據 MB02 韌體設定調整) ★
 const BLE_SERVICE_UUID = '0000ffe0-0000-1000-8000-00805f9b34fb'; 
 const BLE_CHAR_UUID    = '0000ffe1-0000-1000-8000-00805f9b34fb';
 
-let player1Device = null; // 存放 HIDDevice 或 BluetoothRemoteGATTCharacteristic
+// 宣告全域變數
+let player1Device = null;
 let player2Device = null;
+const isAndroid = /Android/i.test(navigator.userAgent);
 
-const PUNCH_THRESHOLD = 6.0;
-const PUNCH_COOLDOWN = 150;
-
-let p1LastForce = 0;
-let p1LastTriggerTime = 0;
-let p2LastForce = 0;
-let p2LastTriggerTime = 0;
-
+// 頁面載入後執行的檢查函式
 function checkSupport() {
     const btn = document.getElementById('hid-btn');
     const status = document.getElementById('hid-status');
-    const isAndroid = /Android/i.test(navigator.userAgent);
 
+    // 優先檢查是否為 Android
     if (isAndroid) {
-        status.innerText = "📱 Android 模式：支援藍牙連線";
+        status.innerText = "📱 Android 模式：請連線藍牙";
         btn.innerText = "🔵 連線 MB02 (藍牙)";
         btn.disabled = false;
-        // 覆蓋原本的 onclick，讓它去跑藍牙連線
-        btn.onclick = connectGrip; 
-    } else if ("hid" in navigator) {
-        status.innerText = "💻 PC 模式：支援 WebHID 連線";
+        btn.onclick = connectGrip; // 綁定統一連線函式
+    } 
+    // 若不是 Android，再檢查 PC 是否支援 HID
+    else if ("hid" in navigator) {
+        status.innerText = "💻 PC 模式：請連線握力球";
+        btn.innerText = "🔵 連線 MB02 (HID)";
         btn.disabled = false;
         btn.onclick = connectGrip;
-    } else {
-        status.innerText = "⚠️ 您的瀏覽器不支援 WebHID/藍牙 (請用 Chrome)";
+    } 
+    // 兩者都不支援
+    else {
+        status.innerText = "⚠️ 瀏覽器不支援 WebHID/藍牙 (請用 Chrome)";
         btn.disabled = true;
     }
 }
 
-// 2. 確保網頁載入後自動執行檢查
-window.addEventListener('load', checkSupport);
+// 執行檢查
+checkSupport();
 
-// 統一入口點
+// 統一連線入口
 async function connectGrip() {
-    const isAndroid = /Android/i.test(navigator.userAgent);
+    // 再次確認環境
     if (isAndroid) {
         await connectBLE();
     } else {
         await connectHID();
     }
 }
+
+// --- 下面接你原本的 connectHID() 與 connectBLE() 實作 ---
 // --- [PC 專用] WebHID 實作 ---
 async function connectHID() {
     try {
